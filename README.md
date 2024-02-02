@@ -1,0 +1,1 @@
+Machine learning model to help analyse the mechanics of a volleyball swing from a video based on the elbow and wrist movement.
