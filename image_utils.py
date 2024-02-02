@@ -29,17 +29,31 @@ def ten_crop(img: tk.PhotoImage, elbow_pos: (int, int), wrist_pos: (int, int)):
     for (x, y) in crop_starts:  #TODO make a horizontal flip for each of the crops
         cropped_image = crop_image(img, x, y, 416, 416)
         dic = {}
+        # Save image 
         dic['image'] = cropped_image
-        dic['has_elbow'] = int(all[elbow_pos[0] - x < 416,  # Check for elbow out of bounds after crop
-                                   elbow_pos[0] - x >= 0, 
-                                   elbow_pos[1] - y < 416, 
-                                   elbow_pos[1] - y >= 0])
-        dic['has_wrist'] = int(all[wrist_pos[0] - x < 416,  # Check for wrist out of bounds after crop
-                                   wrist_pos[0] - x >= 0, 
-                                   wrist_pos[1] - y < 416, 
-                                   wrist_pos[1] - y >= 0])
-        dic['elbos_pos'] = (elbow_pos[0] - x, elbow_pos[1] - y)
-        dic['wrist_pos'] = (wrist_pos[0] - x, wrist_pos[1] - y)
+        
+        # Save eblow position
+        if elbow_pos == None: 
+            dic['has_elbow'] = 0
+            dic['elbow_pos'] = (0, 0)
+        else:
+            dic['has_elbow'] = int(all([elbow_pos[0] - x < 416,  # Check for elbow out of bounds after crop
+                                        elbow_pos[0] - x >= 0, 
+                                        elbow_pos[1] - y < 416, 
+                                        elbow_pos[1] - y >= 0]))
+            dic['elbow_pos'] = (elbow_pos[0] - x, elbow_pos[1] - y)
+        
+        # Save wrist position
+        if wrist_pos == None:
+            dic['has_wrist'] = 0
+            dic['wrist_pos'] = (0, 0)
+        else:
+            dic['has_wrist'] = int(all([wrist_pos[0] - x < 416,  # Check for wrist out of bounds after crop
+                                        wrist_pos[0] - x >= 0, 
+                                        wrist_pos[1] - y < 416, 
+                                        wrist_pos[1] - y >= 0]))
+            dic['wrist_pos'] = (wrist_pos[0] - x, wrist_pos[1] - y)
+
         labeled_images.append(dic)
 
     return labeled_images

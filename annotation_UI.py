@@ -38,7 +38,7 @@ wrist_pos = None
 num_labeled_images = 0
 with os.scandir(LABELED_IMAGES) as entries:
     for entry in entries:
-        if entry.isfile() and entry.name.endswith('.png'):
+        if entry.is_file() and entry.name.endswith('.png'):
             num_labeled_images += 1
 next_labeled_index = num_labeled_images
 
@@ -91,18 +91,18 @@ def add_labeled_image(labeled_image: dict):
     data = [image_name, has_elbow,  normalised_elbow_x, normalised_elbow_y, has_wrist, normalised_wrist_x, normalised_wrist_y]
     with open('annotations.csv', 'a', newline='') as f:
         writer = csv.writer(f)
-        writer.writerows(data)
+        writer.writerow(data)
     next_labeled_index += 1
 
 
 # Creates a new image taken from the center 516x516 square
 def get_center_crop():
     x_center, y_center = c.coords(display_image_id)
-    width, height = c.itemcget(display_image, 'width'), c.itemcget(display_image, 'height')  #TODO fix getting the display_image width and height
-    print(width, height)
-    offset_x = (x_center - width) - 258
-    offset_y = (y_center - height) - 258 
-
+    bbox = c.bbox(display_image_id)
+    width = bbox[2] - bbox[0]
+    height = bbox[3] - bbox[1]
+    offset_x = int(WIDTH_OFFSET - (x_center - width // 2))
+    offset_y = int(HEIGHT_OFFSET - (y_center - height // 2))
     center_image = image_utils.crop_image(display_image, start_x=offset_x, start_y=offset_y, width=516, height=516)
     return center_image
 
