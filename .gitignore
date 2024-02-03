@@ -1,6 +1,7 @@
 *.png
 *.pyc
+*.csv
+test.py
 labeled-images
 unlabeled-images
-annotations.csv
 rescale_test.py

@@ -31,8 +31,8 @@ c.create_oval(4, 14, 10, 20, fill='green', tags='legend')
 c.create_text(32, 17, text='= wrist', tags='legend')
 
 # Label positions based on the center crop (x - WIDTH_OFFSET, y - HEIGHT_OFFSET)
-elbow_pos = None
-wrist_pos = None
+elbow_pos = []
+wrist_pos = []
 
 # Find out how many labeled images there are
 num_labeled_images = 0
@@ -48,22 +48,20 @@ display_image_id = c.create_image(CANVAS_WIDTH // 2, CANVAS_HEIGHT // 2, anchor=
 c.tag_lower("display_image_tag")
 
 
-# Method to label the position of the elbow
+# Label the position of the elbow
 def elbow(event):
-    global elbow_pos
     x, y = event.x, event.y
     c.delete('elbow')
     c.create_oval(x-3, y-3, x+3, y+3, fill='red', tags='elbow')
-    elbow_pos = (x - WIDTH_OFFSET, y - HEIGHT_OFFSET)
+    elbow_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
 
 
-# Method to label the position of the wrist
+# Label the position of the wrist
 def wrist(event):
-    global wrist_pos
     x, y = event.x, event.y
     c.delete('wrist')
     c.create_oval(x-3, y-3, x+3, y+3, fill='green', tags='wrist')
-    wrist_pos = (x - WIDTH_OFFSET, y - HEIGHT_OFFSET)
+    wrist_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
 
 
 # Add the image + labels to the data
@@ -72,35 +70,79 @@ def add_labeled_image(labeled_image: dict):
 
     # Retreive labels from the dictionary
     image = labeled_image['image']
-    has_elbow = labeled_image['has_elbow']
     elbow_pos = labeled_image['elbow_pos']
-    has_wrist = labeled_image['has_wrist']
     wrist_pos = labeled_image['wrist_pos']
 
-    # Format and normalise labels
-    image_name = f'image{next_labeled_index}.png'
-    normalised_elbow_x = elbow_pos[0] / 416
-    normalised_elbow_y = elbow_pos[1] / 416
-    normalised_wrist_x = wrist_pos[0] / 416
-    normalised_wrist_y = wrist_pos[1] / 416
-
     # Write the image to file
+    image_name = f'image{next_labeled_index}.png'
     image.write(LABELED_IMAGES + image_name, format='png')
+    next_labeled_index += 1
+
+    # ===== Save the single elbow and wrist annotations =====
+
+    data = [image_name]
+
+    if elbow_pos == []:
+        data += [0, 0, 0]
+    else:
+        normalised_elbow_x = elbow_pos[0][0] / 416
+        normalised_elbow_y = elbow_pos[0][1] / 416
+        data += [1, normalised_elbow_x, normalised_elbow_y]
+
+    if wrist_pos == []:
+        data += [0, 0, 0]
+    else:
+        normalised_wrist_x = wrist_pos[0][0] / 416
+        normalised_wrist_y = wrist_pos[0][1] / 416
+        data += [1, normalised_wrist_x, normalised_wrist_y]
 
     # Write the labels to file
-    data = [image_name, has_elbow,  normalised_elbow_x, normalised_elbow_y, has_wrist, normalised_wrist_x, normalised_wrist_y]
-    with open('annotations.csv', 'a', newline='') as f:
+    with open(LABELS + 'annotations_single.csv', 'a', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(data)
-    next_labeled_index += 1
+
+    # ===== Save the multiple elbow and wrist annotations =====
+    
+    # Create empty 13 x 13 x 6 labels (13 x 13 yolo object detection cells and 6 labels each)
+    labels = np.zeros((13, 13, 6))
+
+    # Format and normalise labels
+    for x, y in elbow_pos:
+        # Figure out which box the label belongs to
+        box_x = x // 32  
+        box_y = y // 32
+        print("elbow", x, y, box_x, box_y)
+        # Normalise the width and height within the box
+        value_x = (x % 32) / 32
+        value_y = (y % 32) / 32
+        labels[box_x,box_y,:3] = [1, value_x, value_y]
+    
+    for x, y in wrist_pos:
+        # Figure out which box the label belongs to
+        box_x = x // 32  
+        box_y = y // 32
+        print("wrist", x, y, box_x, box_y)
+        # Normalise the width and height within the box
+        value_x = (x % 32) / 32
+        value_y = (y % 32) / 32
+        labels[box_x,box_y,3:] = [1, value_x, value_y]
+
+    # Write the labels to file
+    data = [image_name] + np.ndarray.flatten(labels).tolist()
+    with open(LABELS + 'annotations_multi.csv', 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(data)
 
 
 # Creates a new image taken from the center 516x516 square
 def get_center_crop():
+    # Get the width and height of the image
     x_center, y_center = c.coords(display_image_id)
     bbox = c.bbox(display_image_id)
     width = bbox[2] - bbox[0]
     height = bbox[3] - bbox[1]
+
+    # Get the offset of the crop on the image
     offset_x = int(WIDTH_OFFSET - (x_center - width // 2))
     offset_y = int(HEIGHT_OFFSET - (y_center - height // 2))
     center_image = image_utils.crop_image(display_image, start_x=offset_x, start_y=offset_y, width=516, height=516)
@@ -119,7 +161,7 @@ def next_image():
 # Deletes the elbow and wrist labels
 def reset():
     global elbow_pos, wrist_pos
-    elbow_pos, wrist_pos = None, None
+    elbow_pos, wrist_pos = [], []
     c.delete('elbow', 'wrist')
 
 

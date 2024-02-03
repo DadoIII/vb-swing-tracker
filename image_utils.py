@@ -14,35 +14,27 @@ def horizontal_flip(img: tk.PhotoImage):
             flipped_img.put(rgb_to_hex(img.get(x, y)), (width - x, y))
     return flipped_img
 
-def compile_to_dict(image: tk.PhotoImage, elbow_pos: (int, int) or None, wrist_pos: (int, int) or None):
+def compile_to_dict(image: tk.PhotoImage, elbow_pos: [(int, int)], wrist_pos: [(int, int)]):
     dic = {}
+    dic['elbow_pos'] = []
+    dic['wrist_pos'] = []
+    
     # Save image 
     dic['image'] = image
     
-    # Save eblow position
-    if elbow_pos == None: 
-        dic['has_elbow'] = 0
-        dic['elbow_pos'] = (0, 0)
-    else:
-        dic['has_elbow'] = int(all([elbow_pos[0] >= 0,  # Check for elbow out of bounds after crop
-                                    elbow_pos[0] < image.width(), 
-                                    elbow_pos[1] >= 0, 
-                                    elbow_pos[1] < image.height()]))
-        dic['elbow_pos'] = elbow_pos
+    # Save eblow positions
+    for x, y in elbow_pos:
+        if x >= 0 and x < image.width() and y >= 0 and y < image.height():  # Check for elbow out of bounds after crop 
+            dic['elbow_pos'].append((x,y))
+
+    # Save wrist positions
+    for x, y in wrist_pos:
+        if x >= 0 and x < image.width() and y >= 0 and y < image.height():  # Check for elbow out of bounds after crop 
+            dic['wrist_pos'].append((x,y))
     
-    # Save wrist position
-    if wrist_pos == None:
-        dic['has_wrist'] = 0
-        dic['wrist_pos'] = (0, 0)
-    else:
-        dic['has_wrist'] = int(all([wrist_pos[0] >= 0,  # Check for wrist out of bounds after crop
-                                    wrist_pos[0] < image.width(), 
-                                    wrist_pos[1] >= 0, 
-                                    wrist_pos[1] < image.height()]))
-        dic['wrist_pos'] = wrist_pos
     return dic
 
-def ten_crop(img: tk.PhotoImage, elbow_pos: (int, int) or None, wrist_pos: (int, int) or None):
+def ten_crop(img: tk.PhotoImage, elbow_pos: [(int, int)], wrist_pos: [(int, int)]):
     labeled_images = []
 
     # (x, y) start of crops
@@ -55,20 +47,17 @@ def ten_crop(img: tk.PhotoImage, elbow_pos: (int, int) or None, wrist_pos: (int,
     ]
 
     # Do the 5 crops
-    for (x, y) in crop_starts:
-        cropped_image = crop_image(img, x, y, 416, 416)
-        if elbow_pos != None:  # Get the new elbow position after the crop
-            cropped_elbow_pos = (elbow_pos[0] - x, elbow_pos[1] - y)
-        if wrist_pos != None:  # Get the new wrist position after the crop
-            cropped_wrist_pos = (wrist_pos[0] - x, wrist_pos[1] - y)
+    for (x_start, y_start) in crop_starts:
+        cropped_image = crop_image(img, x_start, y_start, 416, 416)
+
+        cropped_elbow_pos = [(x - x_start, y - y_start) for x, y in elbow_pos]  # Get the new elbow positions after the crop 
+        cropped_wrist_pos = [(x - x_start, y - y_start) for x, y in wrist_pos]  # Get the new wrist positions after the crop
         dic = compile_to_dict(cropped_image, cropped_elbow_pos, cropped_wrist_pos)
         labeled_images.append(dic)
 
-        # Flip each image + elbow and wrist positions horizontally
-        if elbow_pos != None:  # Get the new elbow position after the flip
-            fliped_elbow_pos = (416 - cropped_elbow_pos[0], cropped_elbow_pos[1])
-        if wrist_pos != None:  # Get the new wrist position after the flip
-            fliped_wrist_pos = (416 - cropped_wrist_pos[0], cropped_wrist_pos[1])
+        # Flip each image + elbow and wrist positions horizontally 
+        fliped_elbow_pos = [(416 - x, y) for x, y in cropped_elbow_pos]  # Get the new elbow positions after the flip
+        fliped_wrist_pos = [(416 - x, y) for x, y in cropped_wrist_pos]  # Get the new wrist positions after the flip
         dic = compile_to_dict(horizontal_flip(cropped_image), fliped_elbow_pos, fliped_wrist_pos)
         labeled_images.append(dic)
 
