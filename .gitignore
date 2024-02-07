@@ -1,6 +1,7 @@
 *.png
 *.pyc
 *.csv
+/venv
 test.py
 labeled-images
 unlabeled-images

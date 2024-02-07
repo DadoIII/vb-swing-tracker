@@ -3,11 +3,12 @@ import os
 import csv
 import numpy as np
 import image_utils
+import time
 
 # Basic paths
-UNLABELED_IMAGES = './unlabeled-images/'
-LABELED_IMAGES = './labeled-images/'
-LABELS = './labels/'
+UNLABELED_IMAGES = '../unlabeled-images/'
+LABELED_IMAGES = '../labeled-images/'
+LABELS = '../labels/'
 
 # Create canvas
 CANVAS_WIDTH = 1000
@@ -111,7 +112,6 @@ def add_labeled_image(labeled_image: dict):
         # Figure out which box the label belongs to
         box_x = x // 32  
         box_y = y // 32
-        print("elbow", x, y, box_x, box_y)
         # Normalise the width and height within the box
         value_x = (x % 32) / 32
         value_y = (y % 32) / 32
@@ -121,7 +121,6 @@ def add_labeled_image(labeled_image: dict):
         # Figure out which box the label belongs to
         box_x = x // 32  
         box_y = y // 32
-        print("wrist", x, y, box_x, box_y)
         # Normalise the width and height within the box
         value_x = (x % 32) / 32
         value_y = (y % 32) / 32
@@ -155,6 +154,7 @@ def next_image():
     labeled_images = image_utils.ten_crop(center_image, elbow_pos, wrist_pos)
     for labeled_image in labeled_images:
         add_labeled_image(labeled_image)
+        et = time.time()
     print("Go next!")
 
 

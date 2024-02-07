@@ -1,1 +1,1 @@
-Machine learning model that tracks the position of the elbow and wrist from a video to help analyse the mechanics of a volleyball swing.
+Machine learning model that tracks the position of the elbow and wrist in a video to help analyse the mechanics of a volleyball swing.
