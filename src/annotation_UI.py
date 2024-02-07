@@ -1,13 +1,14 @@
 from tkinter import *
+import numpy as np
+import cv2
 import os
 import csv
-import numpy as np
 import image_utils
 import time
 
 # Basic paths
-UNLABELED_IMAGES = '../unlabeled-images/'
-LABELED_IMAGES = '../labeled-images/'
+UNLABELED_IMAGES = '../unlabeled_images/'
+LABELED_IMAGES = '../labeled_images/'
 LABELS = '../labels/'
 
 # Create canvas
@@ -44,21 +45,24 @@ with os.scandir(LABELED_IMAGES) as entries:
 next_labeled_index = num_labeled_images
 
 images = os.scandir(UNLABELED_IMAGES)
-display_image = PhotoImage(file = UNLABELED_IMAGES + next(images).name)
+image_name = next(images).name
+cv_image = cv2.imread(UNLABELED_IMAGES + image_name)
+display_image = PhotoImage(file = UNLABELED_IMAGES + image_name)
 display_image_id = c.create_image(CANVAS_WIDTH // 2, CANVAS_HEIGHT // 2, anchor='c', image=display_image, tags="display_image_tag")
 c.tag_lower("display_image_tag")
 
 
-# Label the position of the elbow
 def elbow(event):
+    # Store the position of the elbow and highlight it on the canvas
     x, y = event.x, event.y
     c.delete('elbow')
     c.create_oval(x-3, y-3, x+3, y+3, fill='red', tags='elbow')
     elbow_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
 
 
-# Label the position of the wrist
+
 def wrist(event):
+    # Store the position of the wrist and highlight it on the canvas
     x, y = event.x, event.y
     c.delete('wrist')
     c.create_oval(x-3, y-3, x+3, y+3, fill='green', tags='wrist')
@@ -67,6 +71,13 @@ def wrist(event):
 
 # Add the image + labels to the data
 def add_labeled_image(labeled_image: dict):
+    """
+    Saves the image to labeled_images folder and the labels to the corresponding file in the labels folder.
+    Both single and multiple labels are saved separately in the case that I want to experiment with a different model.
+
+    Parameters:
+        labeled_image (dict): Dictionary containing the image, elbow_positions and  wrist positions.
+    """
     global next_labeled_index
 
     # Retreive labels from the dictionary
@@ -76,55 +87,21 @@ def add_labeled_image(labeled_image: dict):
 
     # Write the image to file
     image_name = f'image{next_labeled_index}.png'
-    image.write(LABELED_IMAGES + image_name, format='png')
+    cv2.imwrite(LABELED_IMAGES + image_name, image)
     next_labeled_index += 1
 
-    # ===== Save the single elbow and wrist annotations =====
-
+    # Save the single elbow and wrist annotations
     data = [image_name]
-
-    if elbow_pos == []:
-        data += [0, 0, 0]
-    else:
-        normalised_elbow_x = elbow_pos[0][0] / 416
-        normalised_elbow_y = elbow_pos[0][1] / 416
-        data += [1, normalised_elbow_x, normalised_elbow_y]
-
-    if wrist_pos == []:
-        data += [0, 0, 0]
-    else:
-        normalised_wrist_x = wrist_pos[0][0] / 416
-        normalised_wrist_y = wrist_pos[0][1] / 416
-        data += [1, normalised_wrist_x, normalised_wrist_y]
+    labels = image_utils.normalise_single_labels(elbow_pos, wrist_pos)
+    data += labels
 
     # Write the labels to file
     with open(LABELS + 'annotations_single.csv', 'a', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(data)
 
-    # ===== Save the multiple elbow and wrist annotations =====
-    
-    # Create empty 13 x 13 x 6 labels (13 x 13 yolo object detection cells and 6 labels each)
-    labels = np.zeros((13, 13, 6))
-
-    # Format and normalise labels
-    for x, y in elbow_pos:
-        # Figure out which box the label belongs to
-        box_x = x // 32  
-        box_y = y // 32
-        # Normalise the width and height within the box
-        value_x = (x % 32) / 32
-        value_y = (y % 32) / 32
-        labels[box_x,box_y,:3] = [1, value_x, value_y]
-    
-    for x, y in wrist_pos:
-        # Figure out which box the label belongs to
-        box_x = x // 32  
-        box_y = y // 32
-        # Normalise the width and height within the box
-        value_x = (x % 32) / 32
-        value_y = (y % 32) / 32
-        labels[box_x,box_y,3:] = [1, value_x, value_y]
+    # Save the multiple elbow and wrist annotations
+    labels = image_utils.normalise_multiple_labels(elbow_pos, wrist_pos)
 
     # Write the labels to file
     data = [image_name] + np.ndarray.flatten(labels).tolist()
@@ -133,8 +110,18 @@ def add_labeled_image(labeled_image: dict):
         writer.writerow(data)
 
 
-# Creates a new image taken from the center 516x516 square
-def get_center_crop():
+
+def get_center_crop() -> np.ndarray:
+    """
+    Extracts a center crop from the displayed image.
+
+    This function calculates the correct crop of the highlighted part of the display image based on the image size.
+    Note: This function relies on a global variable `display_image_id` and `cv_image`.
+
+    Returns:
+        np.ndarray: The center crop image as a NumPy array.
+    """
+
     # Get the width and height of the image
     x_center, y_center = c.coords(display_image_id)
     bbox = c.bbox(display_image_id)
@@ -144,35 +131,53 @@ def get_center_crop():
     # Get the offset of the crop on the image
     offset_x = int(WIDTH_OFFSET - (x_center - width // 2))
     offset_y = int(HEIGHT_OFFSET - (y_center - height // 2))
-    center_image = image_utils.crop_image(display_image, start_x=offset_x, start_y=offset_y, width=516, height=516)
+    center_image = image_utils.crop_image(cv_image, start_x=offset_x, start_y=offset_y, width=516, height=516)
+
     return center_image
 
 
-# Saves the 10 crop images and labels and displays the next image
+
 def next_image():
+    """
+    This function saves the 10-crop images and labels of the current image and displays the next one.
+
+    Note: This function relies on global variables `elbow_pos` and `wrist_pos`.
+    """
     center_image = get_center_crop()
     labeled_images = image_utils.ten_crop(center_image, elbow_pos, wrist_pos)
     for labeled_image in labeled_images:
         add_labeled_image(labeled_image)
-        et = time.time()
     print("Go next!")
 
 
-# Deletes the elbow and wrist labels
+
 def reset():
+    # Clears the elbow and wrist labels and deltes the elbow and wrist indicators
     global elbow_pos, wrist_pos
     elbow_pos, wrist_pos = [], []
     c.delete('elbow', 'wrist')
 
 
-# Initialize mouse position
+
 def drag_start(event):
+    """
+    Initialize mouse position for dragging.
+
+    Parameters:
+        event: An event object containing the x and y positions of the initial mouse click.
+    """
     global x_start, y_start
     x_start, y_start = event.x, event.y
 
 
-# Update mouse position and move display image
+
 def drag(event):
+    """
+    Update mouse position and move display image accordingly.
+
+    Parameters:
+        event: An event object containing the x and y positions of the mouse movement.
+    """
     global x_start, y_start
     new_x, new_y = event.x, event.y
     c.move(display_image_id, new_x - x_start, new_y - y_start)
