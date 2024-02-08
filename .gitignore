@@ -2,10 +2,9 @@
 *.pyc
 *.csv
 /venv
-*/__init__.py
-__init__.py
 .vscode
 test.py
 labeled-images
 unlabeled-images
 rescale_test.py
+labeled_image_names.txt

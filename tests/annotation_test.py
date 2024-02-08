@@ -32,6 +32,7 @@ class TestTenCropLabeling(unittest.TestCase):
             self.assertEqual(normalise_single_labels(crop["elbow_pos"], crop["wrist_pos"]), true_value)
     
     def test_multi_label(self):
+        # TODO: Create the multi label test
         pass
 
 if __name__ == '__main__':

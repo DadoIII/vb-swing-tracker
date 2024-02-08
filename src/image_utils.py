@@ -1,8 +1,6 @@
 from typing import List, Tuple, Dict
-import tkinter as tk
 import numpy as np
 import cv2
-import time
 
 def compile_to_dict(image: np.ndarray, elbow_pos: List[Tuple[int, int]], wrist_pos: List[Tuple[int, int]]) -> Dict:
     """
