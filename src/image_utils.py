@@ -6,7 +6,7 @@ import time
 
 def compile_to_dict(image: np.ndarray, elbow_pos: List[Tuple[int, int]], wrist_pos: List[Tuple[int, int]]) -> Dict:
     """
-    Compiles dictionary including the image with its elbow and wrist position labels.
+    Compiles dictionary including the image with its elbow and wrist position labels and checks if they are out of bounds.
 
     Parameters:
         image (np.ndarray): The image to include in the dictionary.
@@ -43,7 +43,7 @@ def compile_to_dict(image: np.ndarray, elbow_pos: List[Tuple[int, int]], wrist_p
     for x, y in wrist_pos:
         if x >= 0 and x < width and y >= 0 and y < height:  # Check for elbow out of bounds after crop 
             dic['wrist_pos'].append((x,y))
-    
+
     return dic
 
 
@@ -58,7 +58,7 @@ def ten_crop(image: np.ndarray, elbow_pos: List[Tuple[int, int]], wrist_pos: Lis
 
     Returns:
         List[Dict]: Returns a list containing the 10 crops.
-            The crops are in a form of a dictionaries that include
+            The crops are in a form of dictionaries that include
             the cropped image and the revelant elbow/wrist positions.
     """
 
@@ -76,16 +76,15 @@ def ten_crop(image: np.ndarray, elbow_pos: List[Tuple[int, int]], wrist_pos: Lis
     # Do the 5 crops
     for (x_start, y_start) in crop_starts:
         cropped_image = crop_image(image, x_start, y_start, 416, 416)
-
-        cropped_elbow_pos = [(x - x_start, y - y_start) for x, y in elbow_pos]  # Get the new elbow positions after the crop 
-        cropped_wrist_pos = [(x - x_start, y - y_start) for x, y in wrist_pos]  # Get the new wrist positions after the crop
+        cropped_elbow_pos = [(x - x_start, y - y_start) for (x, y) in elbow_pos]  # Get the new elbow positions after the crop 
+        cropped_wrist_pos = [(x - x_start, y - y_start) for (x, y) in wrist_pos]  # Get the new wrist positions after the crop
         dic = compile_to_dict(cropped_image, cropped_elbow_pos, cropped_wrist_pos)
         labeled_images.append(dic)
 
         # Flip each image + elbow and wrist positions horizontally
         flipped_image = cv2.flip(cropped_image, 1)  # Flip image horizontally
-        fliped_elbow_pos = [(416 - x, y) for x, y in cropped_elbow_pos]  # Get the new elbow positions after the flip
-        fliped_wrist_pos = [(416 - x, y) for x, y in cropped_wrist_pos]  # Get the new wrist positions after the flip
+        fliped_elbow_pos = [(415 - x, y) for (x, y) in cropped_elbow_pos]  # Get the new elbow positions after the flip
+        fliped_wrist_pos = [(415 - x, y) for (x, y) in cropped_wrist_pos]  # Get the new wrist positions after the flip
         dic = compile_to_dict(flipped_image, fliped_elbow_pos, fliped_wrist_pos)
         labeled_images.append(dic)
 
@@ -118,7 +117,7 @@ def crop_image(image: np.ndarray, start_x , start_y, width, height) -> np.ndarra
     if start_y + height > image.shape[0]:
         raise Exception(f"Crop is out of bounds for the image. Cannot take pixel: (x,{start_y+height}) from an image with height: {image.height()}.")
     
-    return image[start_y:start_y+516, start_x:start_x+516]
+    return image[start_y:start_y+height, start_x:start_x+width]
 
 
 def normalise_single_labels(elbow_pos: List[Tuple[int, int]], wrist_pos: List[Tuple[int, int]]) -> List[int]:
