@@ -6,7 +6,7 @@ class TestTenCropLabeling(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Preprocess some data for testing
-        TEST_IMAGE = "./test_images/fl.png"
+        TEST_IMAGE = "./images/test_images/fl.png"
         image = cv2.imread(TEST_IMAGE)
         cls.preprocessed_data = ten_crop(image, [(0,0), (500, 32), (64, 484), (484, 500), (258, 258)], [(500,32), (0, 0), (64, 484), (484, 500)])
 

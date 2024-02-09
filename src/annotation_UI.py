@@ -7,8 +7,8 @@ import csv
 import image_utils
 
 # Basic paths
-UNLABELED_IMAGES = '../unlabeled_images/'
-LABELED_IMAGES = '../labeled_images/'
+UNLABELED_IMAGES = '../images/unlabeled_images/'  # Images to label, these will be deleted from this folder as they get labeled so keep a copy if needed
+LABELED_IMAGES = '../images/labeled_images/'
 LABELS = '../labels/'
 
 # Load the images
@@ -39,25 +39,11 @@ HEIGHT_OFFSET = (CANVAS_HEIGHT - 516) // 2
 elbow_pos = []
 wrist_pos = []
 
+# Keep track of what type of label was added last
+label_stack = []  
+
 # Remember the number of labeled images total (previously labeled + newly labeled in this session)
 num_labeled_images = 0
-
-
-def elbow(event):
-    # Store the position of the elbow and highlight it on the canvas
-    x, y = event.x, event.y
-    c.delete('elbow')
-    c.create_oval(x-3, y-3, x+3, y+3, fill='red', tags='elbow')
-    elbow_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
-
-
-def wrist(event):
-    # Store the position of the wrist and highlight it on the canvas
-    x, y = event.x, event.y
-    c.delete('wrist')
-    c.create_oval(x-3, y-3, x+3, y+3, fill='green', tags='wrist')
-    wrist_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
-
 
 # Add the image + labels to the data
 def add_labeled_image(labeled_image: dict):
@@ -163,6 +149,23 @@ def write_label_to_file():
             f.write(display_image_name + " (repeated)" + '\n')
 
 
+def delete_display_image():
+    """
+    This function deletes the current dispaly image from the images/unlabeled_images folder.
+    """
+    image_path = UNLABELED_IMAGES + display_image_name
+
+    try:
+        # Check if the file exists
+        if os.path.exists(image_path):
+            os.remove(image_path)
+            print(f"Image {display_image_name} removed successfully.")
+        else:
+            print(f"Image {display_image_name} does not exist.")
+    except Exception as e:
+        print(f"An error occurred while removing the image: {e}")
+
+
 def save_labels():
     """
     This function saves the 10-crop images and labels of the current image and displays the next one.
@@ -186,16 +189,77 @@ def save_labels():
     for labeled_image in labeled_images:
         add_labeled_image(labeled_image)
     
-    # TODO: Remove the image from unlabeled images
+    delete_display_image()
 
     get_next_image()  # Load and display the next image
     
 
+def draw_labels():
+    """
+    Draw all elbow and wrist labels on the canvas making the first one of each a bit bigger in size.
+    """
+    c.delete('elbow', 'wrist')
+
+    labels = [
+            {"positions": elbow_pos, "fill": "red", "tag": "elbow"},
+            {"positions": wrist_pos, "fill": "green", "tag": "wrist"}
+    ]
+
+    for label in labels:
+        first = True
+        for (x, y) in label["positions"]:
+            x = x + WIDTH_OFFSET
+            y = y + HEIGHT_OFFSET
+            if first:
+                c.create_oval(x-5, y-5, x+5, y+5, fill=label["fill"], tags=label["tag"])
+                first = False
+            else:
+                c.create_oval(x-3, y-3, x+3, y+3, fill=label["fill"], tags=label["tag"])
+
+
 def reset():
     # Clears the elbow and wrist labels and deltes the elbow and wrist indicators
-    global elbow_pos, wrist_pos
-    elbow_pos, wrist_pos = [], []
+    global elbow_pos, wrist_pos, label_stack
+    elbow_pos, wrist_pos, label_stack = [], [], []
     c.delete('elbow', 'wrist')
+
+
+def undo_label():
+    # Undos the last placed label
+    global elbow_pos, wrist_pos, label_stack
+    if label_stack:
+        if label_stack.pop() == "elbow":
+            elbow_pos.pop()
+        else:
+            wrist_pos.pop()
+
+        draw_labels()
+    else:
+        print("There is no more labels to undo!")
+
+
+def elbow(event):
+    # Store the position of the elbow and highlight it on the canvas
+    global elbow_pos
+    x, y = event.x, event.y
+    if elbow_pos == []:
+        c.create_oval(x-5, y-5, x+5, y+5, fill='red', tags='elbow')
+    else:
+        c.create_oval(x-3, y-3, x+3, y+3, fill='red', tags='elbow')       
+    elbow_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
+    label_stack.append("elbow")
+
+
+def wrist(event):
+    # Store the position of the wrist and highlight it on the canvas
+    global wrist_pos
+    x, y = event.x, event.y
+    if wrist_pos == []:
+        c.create_oval(x-5, y-5, x+5, y+5, fill='green', tags='wrist')
+    else:
+        c.create_oval(x-3, y-3, x+3, y+3, fill='green', tags='wrist')    
+    wrist_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
+    label_stack.append("wrist")
 
 
 def drag_start(event):
@@ -225,7 +289,9 @@ def drag(event):
 
 
 def get_next_image():
-    # Read in and dispaly the next image
+    """
+    This function reads in and dispalys the next image.
+    """
     global cv_image, display_image_id, display_image, display_image_name
 
     reset()  # Reset labels
@@ -284,8 +350,10 @@ def main():
     # Create buttons
     button1 = tk.Button(text="Reset", command=reset)
     button1.pack()
-    button2 = tk.Button(text="Next", command=save_labels)
+    button2 = tk.Button(text="Undo", command=undo_label)
     button2.pack()
+    button3 = tk.Button(text="Next", command=save_labels)
+    button3.pack()
 
     c.mainloop()
 
