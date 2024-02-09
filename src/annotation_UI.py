@@ -224,6 +224,10 @@ def reset():
     c.delete('elbow', 'wrist')
 
 
+def on_backspace(event):
+    # On backspace press call undo_label
+    undo_label()
+
 def undo_label():
     # Undos the last placed label
     global elbow_pos, wrist_pos, label_stack
@@ -346,6 +350,9 @@ def main():
 
     c.bind('<Button-2>', drag_start)
     c.bind('<B2-Motion>', drag)
+
+    # Bind the Backspace key
+    c.bind_all("<BackSpace>", on_backspace)
 
     # Create buttons
     button1 = tk.Button(text="Reset", command=reset)
