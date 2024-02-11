@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from numpy.testing import assert_array_equal
 from pprint import pprint
-from src.image_utils import ten_crop, normalise_single_labels, normalise_multiple_labels
+from annotation.image_utils import ten_crop, normalise_single_labels, normalise_multiple_labels
 
 class TestTenCropLabeling(unittest.TestCase):
     @classmethod
