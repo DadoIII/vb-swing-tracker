@@ -23,7 +23,7 @@ def distance_based_weights(distances, num_of_scales):
     distances = distances.repeat(1, num_of_scales)
 
     # Create Gaussians centered around ranges_values
-    std_dev = 0.25
+    std_dev = 0.22  # Changing this dictates how much weight should be put on the "correct" scale (higher = more equal, lower = higher peak)
     gaussians = torch.exp(-(distances - range_values)**2 / (2 * std_dev**2))
 
     # Normalize weights across scales for each sample
@@ -53,20 +53,49 @@ class MyDetect(nn.Module):
     include_nms = False
     concat = False
 
-    def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
+    def __init__(self, num_of_layers, ch=()):  # detection layer
         super(MyDetect, self).__init__()
-        self.nc = nc  # number of classes
-        self.no = nc + 5  # number of outputs per anchor
-        self.nl = len(anchors)  # number of detection layers
-        self.na = len(anchors[0]) // 2  # number of anchors
-        self.grid = [torch.zeros(1)] * self.nl  # init grid
-        a = torch.tensor(anchors).float().view(self.nl, -1, 2)
-        self.register_buffer('anchors', a)  # shape(nl,na,2)
-        self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
-        self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
+        self.nc = 2  # number of classes
+        self.nl = num_of_layers  # number of detection layers
+        #self.grid = [torch.zeros(1)] * self.nl  # init grid
+        self.m = nn.ModuleList(nn.Conv2d(x, self.nc * 3, 1) for x in ch)  # output conv
 
     def forward(self, x):
-        pass
+        # x = x.copy()  # for profiling
+        z = []  # inference output
+        self.training |= self.export
+        for i in range(self.nl):
+            x[i] = self.m[i](x[i])  # conv
+            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
-weights = distance_based_weights(torch.Tensor([0.1, 0.2, 0.3, 0.4, 0.5]).reshape(-1, 1), 3)
-print(weights)
+            if not self.training:  # inference
+                if self.grid[i].shape[2:4] != x[i].shape[2:4]:
+                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
+                y = x[i].sigmoid()
+                if not torch.onnx.is_in_onnx_export():
+                    y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
+                    y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+                else:
+                    xy, wh, conf = y.split((2, 2, self.nc + 1), 4)  # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
+                    xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))  # new xy
+                    wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
+                    y = torch.cat((xy, wh, conf), 4)
+                z.append(y.view(bs, -1, self.no))
+
+        if self.training:
+            out = x
+        elif self.end2end:
+            out = torch.cat(z, 1)
+        elif self.include_nms:
+            z = self.convert(z)
+            out = (z, )
+        elif self.concat:
+            out = torch.cat(z, 1)
+        else:
+            out = (torch.cat(z, 1), x)
+
+        return out
+
+#weights = distance_based_weights(torch.Tensor([0.1, 0.2, 0.3, 0.4, 0.5]).reshape(-1, 1), 3)
+#print(weights)
