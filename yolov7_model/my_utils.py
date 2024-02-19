@@ -46,6 +46,46 @@ def weighted_loss(outputs, targets, distances):
     return total_loss
 
 
+class MyDetectSingle(nn.Module):
+    # My detection layers to output the position of single elbow and wrist
+
+    def __init__(self, num_of_layers, ch=()):  # detection layer
+        super(MyDetectSingle, self).__init__()
+        self.nc = 2  # number of classes
+        self.nl = num_of_layers  # number of detection layers
+        #self.grid = [torch.zeros(1)] * self.nl  # init grid
+        self.m = nn.ModuleList()
+        for x in ch:
+            conv_layers = nn.Sequential(
+                nn.Conv2d(x, x//2, kernel_size=5, stride=4, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(x, x//4, kernel_size=5),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(x//4, self.nc * 3, kernel_size=1)
+            )
+            self.m.append(conv_layers)
+
+    def forward(self, x):
+        z = []  # inference output
+        self.training |= self.export
+        for i in range(self.nl):
+            x[i] = self.m[i](x[i])  # conv
+            bs, _, _, _ = x[i].shape
+            x[i] = x[i].view(bs, self.nc * 3).contiguous()
+
+            if not self.training:  # inference
+                y = x[i].sigmoid()
+                y[:, 1:3] *= 416  # xy elbow
+                y[:, 4:6] *= 416  # xy wrist
+                z.append(y)
+
+        if self.training:
+            out = x
+        else:
+            out = (torch.cat(z, 1), x)
+
+        return out
+
 class MyDetect(nn.Module):
     stride = None  # strides computed during build
     export = False  # onnx export
@@ -67,7 +107,7 @@ class MyDetect(nn.Module):
         for i in range(self.nl):
             x[i] = self.m[i](x[i])  # conv
             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
-            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+            x[i] = x[i].view(bs, self.nc * 3, ny, nx).permute(0, 3, 4, 2).contiguous()
 
             if not self.training:  # inference
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
