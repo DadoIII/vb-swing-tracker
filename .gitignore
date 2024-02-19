@@ -1,10 +1,10 @@
 *.png
 *.pyc
 *.csv
+*.jpg
 /venv
 .vscode
 test.py
-labeled-images
-unlabeled-images
-rescale_test.py
+/images
+/yolov5/runs
 labeled_image_names.txt
