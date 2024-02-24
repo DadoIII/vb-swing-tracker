@@ -1,10 +1,20 @@
+# Images and labels
 *.png
-*.pyc
-*.csv
 *.jpg
-/venv
-.vscode
-test.py
+*.csv
 /images
-/yolov5/runs
 labeled_image_names.txt
+/yolov5/runs
+
+# Config files
+*.pyc
+.vscode
+
+# Model weights
+*.pt 
+
+# Virtual environment
+/venv
+
+# Random test file
+test.py

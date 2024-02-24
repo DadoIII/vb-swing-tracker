@@ -99,36 +99,36 @@ class SigmoidBin(nn.Module):
         return loss, out_result
     
 #TODO finsih
-class WeightedLoss(nn.Module):
-    def __init__(self, scales: int):
-        super(WeightedLoss, self).__init__()
-        self.num_of_scales = scales  # Number of scales
+# class WeightedLoss(nn.Module):
+#     def __init__(self, scales: int):
+#         super(WeightedLoss, self).__init__()
+#         self.num_of_scales = scales  # Number of scales
 
-    def forward(self, outputs, targets, distances):
+#     def forward(self, outputs, targets, distances):
 
-        # Outputs (batch_size, output_length, 3)
-        # Targets (batch_size, output_length, 1)
+#         # Outputs (batch_size, output_length, 3)
+#         # Targets (batch_size, output_length, 1)
 
 
-        total_loss = 0
-        # Iterate over the scales
-        scale_losses = torch.zeros((1, 3))
-        for i in range(self.num_of_scales):
-            scale_losses[i] = F.mse_loss(outputs{:,:,i}, targets.squeeze(), reduction='mean')
+#         total_loss = 0
+#         # Iterate over the scales
+#         scale_losses = torch.zeros((1, 3))
+#         for i in range(self.num_of_scales):
+#             scale_losses[i] = F.mse_loss(outputs{:,:,i}, targets.squeeze(), reduction='mean')
 
         
 
 
-        for scale_outputs, scale_targets, distance in zip(outputs, targets, distances):
-            # Calculate the loss for each scale (e.g., using MSE loss)
-            scale_loss = F.mse_loss(scale_outputs, scale_targets, reduction='mean')
-            # Calculate distance-based weights for the current scale
-            scale_weights = self.distance_based_weights(distance[:, 0], distance[:, 1])
-            # Weight the loss for the current scale
-            weighted_scale_loss = torch.dot(scale_weights, scale_loss)
-            # Accumulate the weighted loss
-            total_loss += weighted_scale_loss
-        return total_loss
+#         for scale_outputs, scale_targets, distance in zip(outputs, targets, distances):
+#             # Calculate the loss for each scale (e.g., using MSE loss)
+#             scale_loss = F.mse_loss(scale_outputs, scale_targets, reduction='mean')
+#             # Calculate distance-based weights for the current scale
+#             scale_weights = self.distance_based_weights(distance[:, 0], distance[:, 1])
+#             # Weight the loss for the current scale
+#             weighted_scale_loss = torch.dot(scale_weights, scale_loss)
+#             # Accumulate the weighted loss
+#             total_loss += weighted_scale_loss
+#         return total_loss
     
     def distance_based_weights(self, elbow_labels, wrist_labels):
         """
