@@ -1,7 +1,9 @@
-# Images and labels
+# Images, labels and videos
 *.png
 *.jpg
 *.csv
+*.avi
+*.MOV
 /images
 labeled_image_names.txt
 /yolov5/runs
