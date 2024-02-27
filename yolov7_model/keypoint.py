@@ -19,10 +19,8 @@ _ = model.float().eval()
 #print("LAST LAYER ==============================")
 #print(model.model[-1])
 
-
 if torch.cuda.is_available():
     model.half().to(device)
-
 
 def locate_keypoints(image):
     image = letterbox(image, 960, stride=64, auto=True)[0]
@@ -33,9 +31,9 @@ def locate_keypoints(image):
     if torch.cuda.is_available():
         image = image.half().to(device)   
     output, _ = model(image)
-
-    output = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
+        
     with torch.no_grad():
+        output = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
         output = output_to_keypoint(output)
     nimg = image[0].permute(1, 2, 0) * 255
     nimg = nimg.cpu().numpy().astype(np.uint8)
@@ -43,9 +41,14 @@ def locate_keypoints(image):
     for idx in range(output.shape[0]):
         plot_skeleton_kpts(nimg, output[idx, 7:].T, 3)
 
-    del output, image
-
     return nimg
+
+
+# for i in range(100):
+#     print(f"Total gpu memory allocated: {torch.cuda.memory_allocated()}")
+#     image = cv2.imread(f'./test_images/test{1}.jpg')
+#     locate_keypoints(image)
+
 
 # for i in range(5):
 #     image = cv2.imread(f'./test_images/test{i+1}.jpg')
@@ -63,20 +66,18 @@ def locate_keypoints(image):
 video_path = './test_images/video1.MOV'
 output_path = './test_images/video1_with_keypoints.avi'
 
-monitor_width, monitor_height = 150, 250  # Change this to your monitor's resolution
+monitor_width, monitor_height = 600, 1000  # Change this to your monitor's resolution
 
 cap = cv2.VideoCapture(video_path)
 
 # Get input video properties
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 fps = int(cap.get(cv2.CAP_PROP_FPS))
 
 # Create VideoWriter object to save the output video
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
-out = cv2.VideoWriter(output_path, fourcc, fps / 3, (frame_width, frame_height))
-
-i = 0
+fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+#fourcc = cv2.VideoWriter_fourcc(*'XVID')
+#fourcc = cv2.VideoWriter_fourcc(*'H264')
+out = cv2.VideoWriter(output_path, fourcc, fps, (monitor_width, monitor_height))
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -85,34 +86,20 @@ while cap.isOpened():
         print("Can't receive frame (stream end?). Exiting ...")
         break
 
-    # Resize the frame to fit the monitor's resolution
-    frame = cv2.resize(frame, (monitor_width, monitor_height))
-
-    # Call localize_keypoints function
-    
-    # with torch.profiler.profile(
-    #     activities=[
-    #         torch.profiler.ProfilerActivity.CPU,
-    #         torch.profiler.ProfilerActivity.CUDA,
-    #     ],
-    #     schedule=torch.profiler.schedule(wait=0, warmup=0, active=6, repeat=1),
-    #     record_shapes=True,
-    #     profile_memory=True,
-    #     with_stack=True
-    # ) as prof:
+    # Call locate_keypoints function
     frame_with_keypoints = locate_keypoints(frame)
 
-    # Construct the memory timeline HTML plot.
-    #prof.export_memory_timeline(f"profile{i}.html", device="cuda:0")
-    i += 1
+    frame_with_keypoints = cv2.cvtColor(frame_with_keypoints, cv2.COLOR_RGB2BGR)
+
+    # Resize the frame to fit the monitor's resolution
+    frame_with_keypoints = cv2.resize(frame_with_keypoints, (monitor_width, monitor_height))
 
     # Write frame with keypoints to output video multiple times
-    for _ in range(3):
-        out.write(frame_with_keypoints)
+    out.write(frame_with_keypoints)
 
     cv2.imshow('frame', frame_with_keypoints)
 
-    if cv2.waitKey(10) == ord('q'):
+    if cv2.waitKey(1) == ord('q'):
         break
 
 cap.release()

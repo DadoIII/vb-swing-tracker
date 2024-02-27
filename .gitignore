@@ -4,6 +4,7 @@
 *.csv
 *.avi
 *.MOV
+*.mp4
 /images
 labeled_image_names.txt
 /yolov5/runs
