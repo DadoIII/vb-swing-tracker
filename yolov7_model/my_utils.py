@@ -248,169 +248,169 @@ class MyDetect(nn.Module):
 #print(weights)
     
 def get_keypoint_distance(kpt1, kpt2):
+    # Calucate the euclidian distance between two keypoints (x1, y1), (x2, y2)
     return math.sqrt((kpt1[0] - kpt2[0]) ** 2 + (kpt1[1] - kpt2[1]) ** 2)
 
-def get_elbow_from_skeleton(kpts, steps, left_handed = False):
+def get_elbow_from_skeleton(kpts, check_confidence=False, confidence_threshold=0.5, left_handed=False):
+    """
+    Gets the x, y, confidence values of the elbow from the full yolov7-keypoints skeleton.
+
+    Parameters:
+        kpts (torch.tensor): All of the yolov7-keypoints.
+        check_confidence (bool): Whether to automatically check the confidence of the prediction. When set to True, it returns the x and y only when the prediction confidence is higher than the confidence_threshold. It will not return the confidence anymore.
+        confidence_threshold (double): Only used when check_confidence is True to set the confidence_threshold.
+        left_handed (bool): Whether to track the left arm.
+
+    Returns:
+        torch.tensor or tuple or None: Depending on the conditions, it returns different types:
+            : If check_confidence is False, returns a torch.tensor containing the x, y, and confidence values.
+            : If check_confidence is True and the confidence of the prediction is higher than confidence_threshold, returns a tuple containing the x and y values only.
+            : If check_confidence is True but the confidence of the prediction is below confidence_threshold, returns None.
+    """
     if left_handed:
-        return kpts[7*steps:8*steps]
+        pos = kpts[7*3:8*3]
     else:
-        return kpts[8*steps:9*steps]
+        pos = kpts[8*3:9*3]
+
+    if not check_confidence:
+        return pos
+    elif pos[-1] > confidence_threshold:
+        return pos[:2]
+    else:
+        return None
+
     
-def get_wrist_from_skeleton(kpts, steps, left_handed):
+def get_wrist_from_skeleton(kpts, check_confidence=False, confidence_threshold=0.5, left_handed=False):
+    """
+    Gets the x, y, confidence values of the wrist from the full yolov7-keypoints skeleton.
+
+    Parameters:
+        kpts (torch.tensor): All of the yolov7-keypoints.
+        check_confidence (bool): Whether to automatically check the confidence of the prediction. When set to True, it returns the x and y only when the prediction confidence is higher than the confidence_threshold. It will not return the confidence anymore.
+        confidence_threshold (double): Only used when check_confidence is True to set the confidence_threshold.
+        left_handed (bool): Whether to track the left arm.
+
+    Returns:
+        torch.tensor or tuple or None: Depending on the conditions, it returns different types:
+            : If check_confidence is False, returns a torch.tensor containing the x, y, and confidence values.
+            : If check_confidence is True and the confidence of the prediction is higher than confidence_threshold, returns a tuple containing the x and y values only.
+            : If check_confidence is True but the confidence of the prediction is below confidence_threshold, returns None.
+    """
     if left_handed:
-        return kpts[9*steps:10*steps]
+        pos = kpts[9*3:10*3]
     else:
-        return kpts[10*steps:11*steps]
+        pos = kpts[10*3:11*3]
+
+    if not check_confidence:
+        return pos
+    elif pos[-1] > confidence_threshold:
+        return pos[:2]
+    else:
+        return None
 
 
-def plot_elbow_wrist(im, kpts, steps, left_handed = False):
+def plot_elbow_wrist(im, kpts, left_handed=False):
+    """
+    Plots circles indicating a elbow and a wrist on an image.
+
+    Paremeters:
+        im (np.ndarray): Image to plot the keypoints on.
+        kpts (torch.tensor): Tensor of keypoints. Can be a tensor of the full yolov7-keypoints skeleton. Or any array of length 6 with values: [elbow_x, elbow_y, elbow_confidence, wrist_x, wrist_y, wrist_confidence]
+        left_handed (bool): Whether to track the left arm. (Only works for the full yolov7-keypoints skeleton)
+    """
     # Assume the full original skeleton keypoints were passed in
-    if len(kpts) > 2 * steps:
-        kpts = torch.cat([get_elbow_from_skeleton(kpts, steps, left_handed), get_wrist_from_skeleton(kpts, steps, left_handed)], dim=0)
+    # So extract the elbow and wrist values
+    if len(kpts) > 6:
+        kpts = torch.cat([get_elbow_from_skeleton(kpts, left_handed), get_wrist_from_skeleton(kpts, left_handed)], dim=0)
 
-    #Plot the skeleton and keypointsfor coco datatset
     palette = np.array([[255, 0, 0], [0, 255, 0]])
-
     radius = 5
-    num_kpts = len(kpts) // steps
+    num_kpts = len(kpts) // 3
 
     # Draw the circle
     for kid in range(num_kpts):
         r, g, b = palette[kid]
-        x_coord, y_coord = kpts[steps * kid], kpts[steps * kid + 1]
+        x_coord, y_coord = kpts[3 * kid], kpts[3 * kid + 1]
         if not (x_coord % 640 == 0 or y_coord % 640 == 0):
-            if steps == 3:
-                conf = kpts[steps * kid + 2]
-                if conf < 0.5:
-                    continue
+            conf = kpts[3 * kid + 2]
+            if conf < 0.5:
+                continue
             cv2.circle(im, (int(x_coord), int(y_coord)), radius, (int(r), int(g), int(b)), -1)
 
-
-def plot_elbow_wrist_history(im, history_kpts):
-    palette = np.array([[255, 0, 0], [0, 255, 0]])
-
-    # Draw the line for previous frames
-    if history_kpts:
-        for kpts in history_kpts:
-            if len(kpts) > 8:
-                for i in range(0, len(kpts) - 8, 4):
-                    if kpts[i] != -1 and kpts[i+4] != -1:
-                        cv2.line(im, (kpts[i], kpts[i+1]), (kpts[i+4], kpts[i+5]), (255, 0, 0), thickness=2)
-                    if kpts[i+2] != -1 and kpts[i+6] != -1:
-                        cv2.line(im, (kpts[i+2], kpts[i+3]), (kpts[i+6], kpts[i+7]), (0, 255, 0), thickness=2)
-
-class KeypointHistory:
-    def __init__(self):
-        self.active_history = []
-        self.old_history = []
-
-    def append_keypoints(self, kpts: torch.tensor, steps = 3, left_handed = False):
-        if self.active_history != []:
-            print("new cycle")
-            my_iter = iter(self.active_history)
-
-            while True:
-                try:
-                    item = next(my_iter)
-                    last_positions = self.get_latest_position(item)
-
-                    chosen_idx = None
-                    smallest_distance = 50
-                    chosen_elbow_pos = None
-                    chosen_wrist_pos = None
-
-                    for idx in range(kpts.shape[0]):
-                        new_positions = kpts[idx, :]
-                        elbow_pos = get_elbow_from_skeleton(new_positions, steps, left_handed).tolist()
-                        wrist_pos = get_wrist_from_skeleton(new_positions, steps, left_handed).tolist()
-                        if last_positions[2:] == [-1, -1]:
-                            distance = get_keypoint_distance(elbow_pos[:2], last_positions[:2])
-                        elif last_positions[:2] == [-1, -1]:
-                            distance = get_keypoint_distance(wrist_pos[:2], last_positions[2:])
-                        else:
-                            distance = get_keypoint_distance(elbow_pos[:2], last_positions[:2]) + get_keypoint_distance(wrist_pos[:2], last_positions[2:]) / 2
-                        #print("distance", distance, elbow_pos[2], wrist_pos[2])
-                        if distance < smallest_distance:
-                            smallest_distance = distance
-                            chosen_idx = idx
-                            chosen_elbow_pos = elbow_pos
-                            chosen_wrist_pos = wrist_pos
-                
-                    if chosen_idx != None:
-                        if elbow_pos[2] > 0.5:
-                            item += [int(x) for x in chosen_elbow_pos[:2]]
-                        else:
-                            item += item + [-1, -1]
-                        if wrist_pos[2] > 0.5:
-                            item += item + [int(x) for x in chosen_wrist_pos[:2]]
-                        else:
-                            item += [-1, -1]
-                        print("here")
-                        kpts = torch.cat([kpts[:chosen_idx, :], kpts[chosen_idx + 1:, :]], dim=0)
-
-
-                except StopIteration:
-                    break
-        
-        # If there appears to be new keypoints, add them to active history 
-        if kpts.shape[0] > 0:
-            for idx in range(kpts.shape[0]):
-                self.active_history.append([int(x) for x in get_elbow_from_skeleton(kpts[idx, :], steps, left_handed).tolist()[:2]] + [int(x) for x in get_wrist_from_skeleton(kpts[idx, :], steps, left_handed).tolist()[:2]])
-
-        self.remove_inactive()
-
-    
-    def remove_inactive(self):
-        my_iter = iter(self.active_history)
-
-        while True:
-            try:
-                history = next(my_iter)
-                if history[-min(len(history), 20):] == [-1, -1, -1, -1] * min(len(history), 20):
-                    self.active_history.remove(history)
-                    self.old_history.append(history)
-
-            except StopIteration:
-                break
-
-
-    def get_latest_position(self, bounding_box):
-        for i in range(len(bounding_box) - 1, -1, -4):
-            if bounding_box[max(i - 3, 0):i + 1] == [-1,-1,-1,-1]:
-                continue
-            else:
-                return bounding_box[max(i - 3, 0):i + 1]
-        return None
-
-    def get_history(self):
-        return self.active_history + self.old_history
-    
-    def stats(self):
-        print("active history size:", len(self.active_history))
-        print("old history size:", len(self.old_history))
-
-# TODO: COntinue with last position and tracking image overlay
-class LastPosition:
+class LastPositions:
     def __init__(self):
         self.prev_positions = []
 
-    def new_positions(self, new_positions):
+    def find_continuations(self, new_positions, continuation_distance = 50):
+        """
+        Loops over the list of new positions and tries to find continuations from previous positions.
+        A continuation is when the new keypoint position is within a certain distance from the previous position (default is 50 pixels)
+
+        Parameters:
+            new_positions [(x,y)]: A list of tuples containing the x and y coordiantes of new positions
+            continuation_distance (int): A number indicationg the maximum pixel distance that is considered as a continuation 
+
+        Returns:
+            List(Tuple(Tuple)): A list containing tuples. Each tuple has 2 tuples with x,y coordinates indicating the starting and ending position of the lines to be drawn.
+
+        Example:
+            The returned list has the following structure:
+            [
+                ((10, 10), (20, 20)),  # A line from x:10, y:10 to x:20, y:20
+                ((40, 50), (90, 80)),  # A line from x:40, y:50 to x:90, y:80
+            ]
+        """
+        return_lines = []
+        for new_pos in new_positions:
+            pos = None
+            for prev_pos in self.prev_positions:
+                if get_keypoint_distance(new_pos, prev_pos) < continuation_distance:
+                    pos = prev_pos
+            if pos != None:
+                return_lines.append((pos, new_pos))
+                self.prev_positions.remove(pos)
+
         self.prev_positions = new_positions
 
-# Function to overlay a transparent image onto another image
+        return return_lines
+
+    def get_positions(self):
+        return self.prev_positions
+
+def draw_lines(image, positions, colour=(0, 0, 255, 255), thickness=2):
+    for (pos1, pos2) in positions:
+        draw_line(image, pos1, pos2, colour, thickness)
+
+def draw_line(image, point1, point2, colour=(0, 0, 0, 255), thickness=2):
+    cv2.line(image, point1, point2, colour, thickness)
+
+
 def overlay_transparent(background, overlay, position=(0, 0)):
+    """
+    Overlays a transparent image onto a background. The blending done per pixel and based on the transparency of the overlay pixels.
+    
+    Parameters:
+        background (np.ndarray): Background image to use.
+        overlay (np.ndarray): Overlay image to use. (Has to be RGBA)
+        position Tuple(int): (x, y) offset of the overlay image.
+
+    Returns:
+        np.ndarray: The resulting image with the overlay on top
+
+    Example:
+        overlay pixel value: (255, 0, 0, 255) + background pixel value (0, 255, 255) -> (255, 0, 0)
+        overlay pixel value: (200, 0, 0, 127) + background pixel value (0, 200, 0) -> (100, 100, 0)
+        overlay pixel value: (255, 0, 0, 0) + background pixel value (0, 255, 0) -> (0, 255, 0)
+    """
     h, w = overlay.shape[:2]
-
-    # Extract the alpha channel from the overlay image
-    overlay_alpha = overlay[:, :, 3] / 255.0
-
-    # Calculate the region of interest (ROI) for the overlay
     y1, y2 = position[1], position[1] + h
     x1, x2 = position[0], position[0] + w
 
-    # Blend the images using alpha blending
+    alpha_overlay = overlay[:, :, 3] / 255.0
+    alpha_background = 1.0 - alpha_overlay
+
     for c in range(0, 3):
-        background[y1:y2, x1:x2, c] = (1 - overlay_alpha) * background[y1:y2, x1:x2, c] + \
-                                        overlay_alpha * overlay[:, :, c]
+        background[y1:y2, x1:x2, c] = (alpha_overlay * overlay[:, :, c] +
+                                       alpha_background * background[y1:y2, x1:x2, c])
 
     return background
