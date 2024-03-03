@@ -8,6 +8,8 @@ from utils.datasets import letterbox
 from utils.general import non_max_suppression_kpt
 from utils.plots import output_to_keypoint, plot_skeleton_kpts
 
+from my_utils import plot_elbow_wrist, plot_elbow_wrist_history, KeypointHistory
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
 model = weigths['model']
@@ -19,10 +21,11 @@ _ = model.float().eval()
 #print("LAST LAYER ==============================")
 #print(model.model[-1])
 
+
 if torch.cuda.is_available():
     model.half().to(device)
 
-def locate_keypoints_batch(images):
+def locate_keypoints_batch(images, history):
     in_images = torch.tensor([]).half().to(device)
     for image in images:
         in_image, ratio, padding = letterbox(image.copy(), 960, stride=64, auto=True)
@@ -55,10 +58,18 @@ def locate_keypoints_batch(images):
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
         tensor_batch = outputs[outputs[:, 0] == i, :]
+        history.append_keypoints(tensor_batch[:, 7:], 3)  # Append the new positions to the keypoint history
         for idx in range(tensor_batch.shape[0]):
-            plot_skeleton_kpts(image, tensor_batch[idx, 7:].T, 3)
-
+            #plot_skeleton_kpts(image, tensor_batch[idx, 7:].T, 3)
+            plot_elbow_wrist(image, tensor_batch[idx, 7:].T, 3)
+        
+        print(len(history.get_history()))
+        history.stats()
+        plot_elbow_wrist_history(image, history.get_history())
+            
         plotted_images.append(image)
+
+      
 
     return plotted_images
 
@@ -77,12 +88,16 @@ print("fps", fps)
 print("Frame width:", frame_width)
 print("Frame height:", frame_height)
 
+tracking_image = np.zeros((frame_height, frame_width, 4), dtype=np.uint8)
+
 # Create VideoWriter object to save the output video
 fourcc = cv2.VideoWriter_fourcc(*'MJPG')
 out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
 
 #import time
 #start_time = time.time()
+
+history = KeypointHistory()
 
 while cap.isOpened():
     # Read a batch of frames
@@ -97,7 +112,7 @@ while cap.isOpened():
         break
 
     # Call locate_keypoints function to process the batch of frames
-    frames_with_keypoints = locate_keypoints_batch(frames)
+    frames_with_keypoints = locate_keypoints_batch(frames, tracking_image)
 
     # Convert frames with keypoints back to list of frames
     frames_with_keypoints = [cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) for frame in frames_with_keypoints]
