@@ -2,30 +2,37 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import cv2
-from torchvision import transforms
 import numpy as np
+from torchvision import transforms
+from typing import List
+
 from utils.datasets import letterbox
 from utils.general import non_max_suppression_kpt
 from utils.plots import output_to_keypoint, plot_skeleton_kpts
 
 from my_utils import *
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
-model = weigths['model']
-_ = model.float().eval()
+def locate_keypoints_batch(images: List[np.ndarray], model: nn.Module, device="cpu", tracking=False, tracking_image: np.ndarray=None, elbow_history: LastPositions=None, wrist_history: LastPositions=None):
+    """
+    This function takes in a batch of images and runs them throught a model, estimating the positons of the elbow and wrist in each of the images and drawing a circle to indicate their position. \n
+    If tracking = True it assumes the images are a part of a video and tries to draw tracking lines frame by frame. When tracking = True, all of tracking_image, elbow_history and wrist_history must be provided.
 
+    Parameters:
+        images (list(np.ndarray)): List of images in a format that cv2 can read in (np.ndarray).
+        model (nn.Module): Model to be used.
+        device (str): The device cuda will use to run the model on.
+        tracking (bool): A boolean indicating whether the batch of images is froma video and a tracking line should be drawn.
+        tracking_image (np.ndarray): Transparent image that stores the previously drawn tracking lines.
+        elbow_history (LastPositions): Object that holds the last positions of all the elbows.
+        wrist_history (LastPositions): Object that holds the last positions of all the wrists.
 
-#print(model)
-#model.model[-1] = nn.Conv2d(in_channels=512, out_channels=6, kernel_size=1)
-#print("LAST LAYER ==============================")
-#print(model.model[-1])
+    Returns:
+        List(np.ndarray): A list of images with the elbows and wrists drawn in.
+    """
 
+    if tracking and (tracking_image == None or elbow_history == None or wrist_history == None):
+        raise Exception(f"Tracking is true, therefore all of tracking_image, elbow_history and wrist_history has to be supplied, but one of them wasnt")
 
-if torch.cuda.is_available():
-    model.half().to(device)
-
-def locate_keypoints_batch(images):
     # Preprocess images for model inference
     in_images = torch.tensor([]).half().to(device)
     for image in images:
@@ -66,77 +73,101 @@ def locate_keypoints_batch(images):
             skeleton_keypoints = tensor_batch[idx, 7:].T
             plot_elbow_wrist(image, skeleton_keypoints, 3)
             # Get elbow and wrist positions for each image in the batch (only when confidence is above 0.5)
-            elbow_positions.append(get_elbow_from_skeleton(skeleton_keypoints, 3, check_confidence=True))
-            wrist_positions.append(get_wrist_from_skeleton(skeleton_keypoints, 3, check_confidence=True))
+            if tracking:
+                elbow_positions.append(get_elbow_from_skeleton(skeleton_keypoints, check_confidence=True))
+                wrist_positions.append(get_wrist_from_skeleton(skeleton_keypoints, check_confidence=True))
 
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
         # Preprocess and find previous positions to connect to
-        elbow_lines = elbow_history.find_continuations([tuple([int(x) for x in pos]) for pos in elbow_positions if pos != None])
-        wrist_lines = wrist_history.find_continuations([tuple([int(x) for x in pos]) for pos in wrist_positions if pos != None])
-        draw_lines(tracking_image, elbow_lines, colour = (0, 0, 255, 255))
-        draw_lines(tracking_image, wrist_lines, colour = (0, 255, 0, 255))
-        image = overlay_transparent(image, tracking_image)
+        if tracking:
+            elbow_lines = elbow_history.find_continuations([tuple([int(x) for x in pos]) for pos in elbow_positions if pos != None])
+            wrist_lines = wrist_history.find_continuations([tuple([int(x) for x in pos]) for pos in wrist_positions if pos != None])
+            draw_lines(tracking_image, elbow_lines, colour = (0, 0, 255, 255))
+            draw_lines(tracking_image, wrist_lines, colour = (0, 255, 0, 255))
+            image = overlay_transparent(image, tracking_image)
             
         plotted_images.append(image)
 
     return plotted_images
 
-video_path = './test_images/video1.MOV'
-output_path = './test_images/video1_with_keypoints.avi'
-batch_size = 6
 
-cap = cv2.VideoCapture(video_path)
 
-# Get input video properties
-fps = int(cap.get(cv2.CAP_PROP_FPS))
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+def main():
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
+    model = weigths['model']
+    _ = model.float().eval()
 
-print("fps", fps)
-print("Frame width:", frame_width)
-print("Frame height:", frame_height)
 
-tracking_image = np.zeros((frame_height, frame_width, 4), dtype=np.uint8)
-# Set the alpha channel to fully transparent (0)
-tracking_image[:, :, 3] = 0  # Alpha channel
+    #print(model)
+    #model.model[-1] = nn.Conv2d(in_channels=512, out_channels=6, kernel_size=1)
+    #print("LAST LAYER ==============================")
+    #print(model.model[-1])
 
-# Create VideoWriter object to save the output video
-fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
 
-#import time
-#start_time = time.time()
+    if torch.cuda.is_available():
+        model.half().to(device)
 
-elbow_history = LastPositions()
-wrist_history = LastPositions()
 
-while cap.isOpened():
-    # Read a batch of frames
-    frames = []
-    for _ in range(batch_size):
-        ret, frame = cap.read()
-        if not ret:
+    video_path = './test_images/video1.MOV'
+    output_path = './test_images/video1_with_keypoints.avi'
+    batch_size = 6
+
+    cap = cv2.VideoCapture(video_path)
+
+    # Get input video properties
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    print("fps", fps)
+    print("Frame width:", frame_width)
+    print("Frame height:", frame_height)
+
+    tracking_image = np.zeros((frame_height, frame_width, 4), dtype=np.uint8)
+    # Set the alpha channel to fully transparent (0)
+    tracking_image[:, :, 3] = 0  # Alpha channel
+
+    # Create VideoWriter object to save the output video
+    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+
+    elbow_history = LastPositions()
+    wrist_history = LastPositions()
+
+    #import time
+    #start_time = time.time()
+
+    while cap.isOpened():
+        # Read a batch of frames
+        frames = []
+        for _ in range(batch_size):
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+
+        if len(frames) == 0:
             break
-        frames.append(frame)
 
-    if len(frames) == 0:
-        break
+        # Call locate_keypoints function to process the batch of frames
+        frames_with_keypoints = locate_keypoints_batch(frames, model, device, True, tracking_image, elbow_history, wrist_history)
 
-    # Call locate_keypoints function to process the batch of frames
-    frames_with_keypoints = locate_keypoints_batch(frames, tracking_image)
+        # Write the frames with keypoints to the output video
+        for frame_keypoints in frames_with_keypoints:
+            out.write(frame_keypoints)
 
-    # Write the frames with keypoints to the output video
-    for frame_keypoints in frames_with_keypoints:
-        out.write(frame_keypoints)
+        if cv2.waitKey(1) == ord('q'):
+            break
 
-    if cv2.waitKey(1) == ord('q'):
-        break
+    # Time the inference time
+    #print("Elapsed time:", time.time() - start_time, "seconds")
 
-# Time the inference time
-#print("Elapsed time:", time.time() - start_time, "seconds")
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
 
-cap.release()
-out.release()
-cv2.destroyAllWindows()
 
+if __name__ == "__main__":
+    main()
