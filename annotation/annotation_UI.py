@@ -9,7 +9,7 @@ import image_utils
 # Basic paths
 UNLABELED_IMAGES = '../images/unlabeled_images/'  # Images to label, these will be deleted from this folder as they get labeled so keep a copy if needed
 LABELED_IMAGES = '../images/labeled_images/'
-LABELS = '../labels/'
+LABELS = '../images/labels/'
 
 # Load the images
 images = os.scandir(UNLABELED_IMAGES)

@@ -50,53 +50,12 @@ def weighted_loss(outputs, targets, distances):
         total_loss += weighted_scale_loss
     return total_loss
 
-
-class MyIKeypoint(nn.Module):
-    export = False
-
-    def __init__(self, nc=1, anchors=(), nkpt=2, ch=(), inplace=True, dw_conv_kpt=True):  # detection layer
-        super(MyIKeypoint, self).__init__()
-        self.nkpt = nkpt
-        self.dw_conv_kpt = dw_conv_kpt
-        self.no_kpt = 3*self.nkpt ## number of outputs for all keypoints
-        
-        if self.nkpt is not None:
-            if self.dw_conv_kpt: #keypoint head is slightly more complex
-                self.m_kpt = nn.ModuleList(
-                            nn.Sequential(DWConv(x, x, k=3), Conv(x, x),
-                                          DWConv(x, x, k=3), Conv(x, x),
-                                          DWConv(x, x, k=3), Conv(x, x),
-                                          DWConv(x, x, k=3), Conv(x, x),
-                                          DWConv(x, x, k=3), Conv(x, x),
-                                          DWConv(x, x, k=3), nn.Conv2d(x, self.no_kpt, 1)) for x in ch)
-            else: #keypoint head is a single convolution
-                self.m_kpt = nn.ModuleList(nn.Conv2d(x, 6, 1) for x in ch)
-
-    def forward(self, x):
-        z = []  # inference output
-        self.training |= self.export
-        for i in range(self.m_kpt):
-            x[i] = self.m_kpt[i](x[i])
-
-            if not self.training:  # inference
-                if self.nkpt != 0:
-                    x[i][..., 2::3] = x[i][..., 2::3].sigmoid()
-
-                z.append(x[i].view(-1, self.no_kpt))
-
-        return x if self.training else (torch.cat(z, 1), x)
-
-    @staticmethod
-    def _make_grid(nx=20, ny=20):
-        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
-        return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
-
     
 def get_keypoint_distance(kpt1, kpt2):
     # Calucate the euclidian distance between two keypoints (x1, y1), (x2, y2)
     return math.sqrt((kpt1[0] - kpt2[0]) ** 2 + (kpt1[1] - kpt2[1]) ** 2)
 
-def get_elbow_from_skeleton(kpts, check_confidence=False, confidence_threshold=0.5, left_handed=False):
+def get_elbow_from_skeleton(kpts, left_handed=False, check_confidence=False, confidence_threshold=0.5, ):
     """
     Gets the x, y, confidence values of the elbow from the full yolov7-keypoints skeleton.
 
@@ -125,7 +84,7 @@ def get_elbow_from_skeleton(kpts, check_confidence=False, confidence_threshold=0
         return None
 
     
-def get_wrist_from_skeleton(kpts, check_confidence=False, confidence_threshold=0.5, left_handed=False):
+def get_wrist_from_skeleton(kpts, left_handed=False, check_confidence=False, confidence_threshold=0.5):
     """
     Gets the x, y, confidence values of the wrist from the full yolov7-keypoints skeleton.
 
@@ -164,23 +123,20 @@ def plot_elbow_wrist(im, kpts, left_handed=False):
         left_handed (bool): Whether to track the left arm. (Only works for the full yolov7-keypoints skeleton)
     """
     # Assume the full original skeleton keypoints were passed in
-    # So extract the elbow and wrist values
+    # And extract the elbow and wrist values
     if len(kpts) > 6:
-        kpts = torch.cat([get_elbow_from_skeleton(kpts, left_handed), get_wrist_from_skeleton(kpts, left_handed)], dim=0)
+        kpts = torch.cat([get_elbow_from_skeleton(kpts, left_handed, check_confidence=True), get_wrist_from_skeleton(kpts, left_handed, check_confidence=True)], dim=0)
 
     palette = np.array([[255, 0, 0], [0, 255, 0]])
     radius = 5
-    num_kpts = len(kpts) // 3
+    num_kpts = len(kpts) // 2
 
     # Draw the circle
     for kid in range(num_kpts):
         r, g, b = palette[kid]
-        x_coord, y_coord = kpts[3 * kid], kpts[3 * kid + 1]
-        if not (x_coord % 640 == 0 or y_coord % 640 == 0):
-            conf = kpts[3 * kid + 2]
-            if conf < 0.5:
-                continue
-            cv2.circle(im, (int(x_coord), int(y_coord)), radius, (int(r), int(g), int(b)), -1)
+        x_coord, y_coord = kpts[2 * kid], kpts[2 * kid + 1]
+        #if not (x_coord % 640 == 0 or y_coord % 640 == 0):
+        cv2.circle(im, (int(x_coord), int(y_coord)), radius, (int(r), int(g), int(b)), -1)
 
 class LastPositions:
     def __init__(self):

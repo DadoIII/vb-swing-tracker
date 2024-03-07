@@ -497,6 +497,12 @@ class Model(nn.Module):
             self.stride = m.stride
             self._initialize_biases_kpt()  # only run once
             #print('Strides: %s' % m.stride.tolist())
+        if isinstance(m, MyIKeypoint):
+            s = 256  # 2x min stride
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+            self.stride = m.stride
+            self._initialize_biases_kpt()  # only run once
+            #print('Strides: %s' % m.stride.tolist())
 
         # Init weights, biases
         initialize_weights(self)
@@ -533,7 +539,7 @@ class Model(nn.Module):
                 self.traced=False
 
             if self.traced:
-                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m, IKeypoint):
+                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m, IKeypoint) or isinstance(MyIKeypoint):
                     break
 
             if profile:
@@ -843,6 +849,41 @@ class IDetect(nn.Module):
         box @= convert_matrix                          
         return (box, score)
 
+class MyIKeypoint(nn.Module):
+    export = False
+    stride = None
+
+    def __init__(self, nc=1, anchors=(), nkpt=2, ch=(), inplace=True, dw_conv_kpt=True):  # detection layer
+        super(MyIKeypoint, self).__init__()
+        self.nkpt = nkpt
+        self.dw_conv_kpt = dw_conv_kpt
+        self.no_kpt = 3*self.nkpt ## number of outputs for all keypoints
+        
+        if self.nkpt is not None:
+            if self.dw_conv_kpt: #keypoint head is slightly more complex
+                self.m_kpt = nn.ModuleList(
+                            nn.Sequential(DWConv(x, x, k=3), Conv(x, x),
+                                          DWConv(x, x, k=3), Conv(x, x),
+                                          DWConv(x, x, k=3), Conv(x, x),
+                                          DWConv(x, x, k=3), Conv(x, x),
+                                          DWConv(x, x, k=3), Conv(x, x),
+                                          DWConv(x, x, k=3), nn.Conv2d(x, self.no_kpt, 1)) for x in ch)
+            else: #keypoint head is a single convolution
+                self.m_kpt = nn.ModuleList(nn.Conv2d(x, 6, 1) for x in ch)
+
+    def forward(self, x):
+        z = []  # inference output
+        self.training |= self.export
+        for i in range(len(x)):
+            x[i] = self.m_kpt[i](x[i])
+
+            if not self.training:  # inference
+                if self.nkpt != 0:
+                    x[i][..., 2::3] = x[i][..., 2::3].sigmoid()
+
+                z.append(x[i].view(-1, self.no_kpt))
+
+        return x if self.training else (torch.cat(z, 1), x)
 
 def parse_model(d, ch):  # model_dict, input_channels(3)
     logger.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
