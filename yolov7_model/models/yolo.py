@@ -877,11 +877,14 @@ class MyIKeypoint(nn.Module):
         for i in range(len(x)):
             x[i] = self.m_kpt[i](x[i])
 
+            bs, _, ny, nx = x[i].shape
+            x[i] = x[i].view(bs, 6, ny, nx).permute(0, 2, 3, 1).contiguous()
+
             if not self.training:  # inference
                 if self.nkpt != 0:
                     x[i][..., 2::3] = x[i][..., 2::3].sigmoid()
 
-                z.append(x[i].view(-1, self.no_kpt))
+                z.append(x[i].view(x[i].shape[0], -1, self.no_kpt))
 
         return x if self.training else (torch.cat(z, 1), x)
 

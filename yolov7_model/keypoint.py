@@ -46,8 +46,6 @@ def batch_inference(images: List[np.ndarray], model: nn.Module, device="cpu", le
         in_images = torch.cat([in_images, torch.tensor(in_image)])
 
     outputs, _ = model(in_images)
-        
-    print(len(outputs))
 
     with torch.no_grad():
         outputs = non_max_suppression_kpt(outputs, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
@@ -166,33 +164,67 @@ def video_inference(model, video_path, output_path, batch_size=1, device="cpu", 
 
 def test_model_output(model, image, device):
     image = cv2.imread(image)
-    image, ratio, pad = letterbox(image, 640, stride=64, auto=True)
-    print(ratio, pad)
+    image, ratio, padding = letterbox(image, 960, stride=64, auto=True)
+    print(ratio, padding)
     image = transforms.ToTensor()(image)
     image = torch.tensor(np.array([image.numpy()]))
     image = image.to(device)
     image = image.half()
 
-    output, _ = model(image)
+    output, out2 = model(image)
+
+    # with torch.no_grad():
+    #     output = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
+    #     output = torch.from_numpy(output_to_keypoint(output))
+
+    # # Rescale output to original image
+    # paddings = torch.tensor([padding[0], padding[1], 0])
+    # factors = torch.tensor([1 / ratio[0], 1 / ratio[1], 1])
+    # repeat_factors = factors.tile((output.shape[1] - 7) // 3)
+    # repeat_paddings = paddings.tile((output.shape[1] - 7) // 3)
+    # output = torch.cat([output[:, :7], (output[:, 7:] - repeat_paddings) * repeat_factors], dim=1)
 
     print(len(output))
-    print(output[0].shape)
+    print(output.shape)
+    print(output[0, 0, :])
+    print(out2[0].shape)
+
+    with torch.no_grad():
+        #outputs = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
+        elbows, wrists = elbow_wrist_nms(out2, 0.501, overlap_distance=0.01)
+
+    print(len(elbows))
+    print(elbows[:5])
+    print(len(wrists))
+    print(wrists[:5])
+
+    # print(len(outputs))
+    # print(outputs[0].shape)
+    # print(outputs[0][0, :])
+    #print(len(output[1]))
+    #print(output[1][0].shape)
+    #print(output[1][1].shape)
+    #print(output[1][2].shape)
+    #print(output[1][3].shape)
 
 
 def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
-    _ = model.float().eval()
+    
+    torch.manual_seed(1)
 
     #print(model)
     layer = MyIKeypoint(ch=(256, 512, 768, 1024))
     layer.f = [114, 115, 116, 117]
     layer.i = 118
     model.model[-1] = layer
+    
     # print("LAST LAYER ==============================")
     # print(model)
 
+    _ = model.float().eval()
     if torch.cuda.is_available():
         model.half().to(device)
 

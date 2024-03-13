@@ -50,6 +50,54 @@ def weighted_loss(outputs, targets, distances):
         total_loss += weighted_scale_loss
     return total_loss
 
+def elbow_wrist_nms(prediction, conf_thres=0.5, overlap_distance = 0.05):
+    """Runs Non-Maximum Suppression (NMS) for elbows and wrists.
+
+    Parameters:
+        predictions (List(torch.Tensor)): A list of tensors of shape (bs, x_grids, y_grids, 6)
+        conf_thres (float): A threshold for confidence of a singular elbow or wrist prediction
+        overlap_distance (float): Distance, which is considered as overlapping keypoints. It should be a ratio betwenn 0 and 1.
+
+    Returns:
+         elbows: List of tuples containing elbow detections (x, y, conf), where x and y are represent a ratio of the width/height
+         wrists: List of tuples containing wrist detections (x, y, conf), where x and y are represent a ratio of the width/height
+    """
+
+    elbows = []
+    wrists = []
+
+    for scale in prediction:
+        x_size = 1 / scale.shape[1]
+        y_size = 1 / scale.shape[2]
+        elbow_mask = scale[:, :, :, 2] > conf_thres
+        wrist_mask = scale[:, :, :, -1] > conf_thres
+        elbow_indices = torch.nonzero(elbow_mask)
+        wrist_indices = torch.nonzero(wrist_mask)
+        for idx in elbow_indices:
+            bs, x, y = idx.tolist()
+            x_pos = float(x * x_size + x_size * scale[bs, x, y, 0])
+            y_pos = float(y * y_size + y_size * scale[bs, x, y, 1])
+            conf = float(scale[bs, x, y, 2])
+            overlapping = False
+            for x, y, _ in elbows:
+                if get_keypoint_distance((x,y), (x_pos, y_pos)) < overlap_distance:
+                    overlapping = True
+            if not overlapping:
+                elbows.append((x_pos, y_pos, conf))
+
+        for idx in wrist_indices:
+            bs, x, y = idx.tolist()
+            x_pos = float(x * x_size + x_size * scale[bs, x, y, 3])
+            y_pos = float(y * y_size + y_size * scale[bs, x, y, 4])
+            conf = float(scale[bs, x, y, 5])
+            overlapping = False
+            for x, y, _ in wrists:
+                if get_keypoint_distance((x,y), (x_pos, y_pos)) < overlap_distance:
+                    overlapping = True
+            if not overlapping:
+                wrists.append((x_pos, y_pos, conf))
+
+    return elbows, wrists
     
 def get_keypoint_distance(kpt1, kpt2):
     # Calucate the euclidian distance between two keypoints (x1, y1), (x2, y2)
