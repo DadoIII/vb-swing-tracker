@@ -161,6 +161,24 @@ def get_wrist_from_skeleton(kpts, left_handed=False, check_confidence=False, con
         return None
 
 
+def plot_keypoints(im, elbows, wrists):
+    """
+    Plots circles indicating elbows and wrists on an image.
+
+    Paremeters:
+        im (np.ndarray): Image to plot the keypoints on.
+        elbows (list[(float)]): A list of tuples containing the x, y, conf of elbow keypoints
+        wrists (list[(float)]): A list of tuples containing the x, y, conf of wrist keypoints
+    """
+    height, width = im.shape[:2]
+    colour = (0, 0, 255)
+    for x, y, _ in elbows:
+        cv2.circle(im, (int(x * width), int(y * height)), 5, colour, -1)
+
+    colour = (255, 0, 0)
+    for x, y, _ in wrists:
+        cv2.circle(im, (int(x * width), int(y * height)), 5, colour, -1)
+
 def plot_elbow_wrist(im, kpts, left_handed=False):
     """
     Plots circles indicating a elbow and a wrist on an image.
