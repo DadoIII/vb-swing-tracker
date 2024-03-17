@@ -15,7 +15,7 @@ from my_utils import *
 
 
 def finetune_keypoint():
-
+    pass
     
 
 def batch_inference(images: List[np.ndarray], model: nn.Module, device="cpu", left_handed=False, tracking=False, tracking_image: np.ndarray=None, elbow_history: LastPositions=None, wrist_history: LastPositions=None):

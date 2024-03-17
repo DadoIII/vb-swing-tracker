@@ -72,10 +72,7 @@ class CustomLoss(nn.Module):
         Returns:
             scale_loss (tensor): Scalar tensor representing the computed loss for the scale.
         """
-        # Implement your scale-specific loss computation here
-        # For example, you can use functions from torch.nn.functional (F) to compute the loss
-        
-        # Example:
+
         pred_x_elbow, pred_y_elbow, pred_conf_elbow, pred_x_wrist, pred_y_wrist, pred_conf_wrist = torch.split(pred, 1, dim=-1)
         target_x_elbow, target_y_elbow, target_conf_elbow, target_x_wrist, target_y_wrist, target_conf_wrist = torch.split(target, 1, dim=-1)
         
@@ -84,18 +81,31 @@ class CustomLoss(nn.Module):
         mask_wrist = (target_conf_wrist == 1).squeeze(-1)
         
         # Compute the positional loss for the elbow (considering only confident predictions)
-        loss_x_elbow = F.mse_loss(pred_x_elbow[mask_elbow], target_x_elbow[mask_elbow])
-        loss_y_elbow = F.mse_loss(pred_y_elbow[mask_elbow], target_y_elbow[mask_elbow])
-        
+        if mask_elbow.nonzero().numel() > 0:
+            loss_x_elbow = F.mse_loss(pred_x_elbow[mask_elbow], target_x_elbow[mask_elbow])
+            loss_y_elbow = F.mse_loss(pred_y_elbow[mask_elbow], target_y_elbow[mask_elbow])
+        else:
+            loss_x_elbow = loss_y_elbow = torch.tensor(0.0, device=pred.device)
+
         # Compute the positional loss for the wrist (considering only confident predictions)
-        loss_x_wrist = F.mse_loss(pred_x_wrist[mask_wrist], target_x_wrist[mask_wrist])
-        loss_y_wrist = F.mse_loss(pred_y_wrist[mask_wrist], target_y_wrist[mask_wrist])
+        if mask_wrist.nonzero().numel() > 0:
+            loss_x_wrist = F.mse_loss(pred_x_wrist[mask_wrist], target_x_wrist[mask_wrist])
+            loss_y_wrist = F.mse_loss(pred_y_wrist[mask_wrist], target_y_wrist[mask_wrist])
+        else:
+            loss_x_wrist = loss_y_wrist = torch.tensor(0.0, device=pred.device)
         
+        #print(F.binary_cross_entropy(torch.Tensor([0]), torch.Tensor([1])))
         # Compute the confidence loss for the elbow and wrist
-        loss_conf_elbow = F.binary_cross_entropy_with_logits(pred_conf_elbow.squeeze(-1)[mask_elbow], target_conf_elbow.squeeze(-1)[mask_elbow])
-        loss_conf_wrist = F.binary_cross_entropy_with_logits(pred_conf_wrist.squeeze(-1)[mask_wrist], target_conf_wrist.squeeze(-1)[mask_wrist])
+        loss_conf_elbow = F.binary_cross_entropy(pred_conf_elbow.view(-1), target_conf_elbow.view(-1))
+        loss_conf_wrist = F.binary_cross_entropy(pred_conf_wrist.view(-1), target_conf_wrist.view(-1))
         
         # Aggregate the losses for elbow and wrist
+        # print(loss_x_elbow)
+        # print(loss_y_elbow)
+        # print(loss_x_wrist)
+        # print(loss_y_wrist)
+        # print(loss_conf_elbow)
+        # print(loss_conf_wrist)
         scale_loss = loss_x_elbow + loss_y_elbow + loss_x_wrist + loss_y_wrist + loss_conf_elbow + loss_conf_wrist
         
         return scale_loss
