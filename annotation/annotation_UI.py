@@ -222,7 +222,7 @@ def reset():
              'wrist_left': [],
              }
     c.delete('elbow_right', 'wrist_right', 'elbow_left', 'wrist_left')
-    print("All keypoints removed!")
+    print("All keypoints reset!")
 
 def on_backspace(event):
     # On backspace press call undo_label
