@@ -25,19 +25,25 @@ with open(LABELS + "labeled_image_names.txt", "r") as f:
         labeled_image_names[name] = line_num
 
 # Specify canvas dimensions
-CANVAS_WIDTH = 1000
-CANVAS_HEIGHT = 800
+CANVAS_WIDTH = 1920
+CANVAS_HEIGHT = 1080
+
+IMAGE_SIZE = 960
+CROP_SIZE = 100
 
 # Create canvas
 c = tk.Canvas(width = CANVAS_WIDTH, height = CANVAS_HEIGHT)
 c.pack()
 
-WIDTH_OFFSET = (CANVAS_WIDTH - 516) // 2
-HEIGHT_OFFSET = (CANVAS_HEIGHT - 516) // 2
+WIDTH_OFFSET = (CANVAS_WIDTH - (IMAGE_SIZE + CROP_SIZE)) // 2
+HEIGHT_OFFSET = (CANVAS_HEIGHT - (IMAGE_SIZE + CROP_SIZE)) // 2
 
 # Label positions based on the center crop (x - WIDTH_OFFSET, y - HEIGHT_OFFSET)
-elbow_pos = []
-wrist_pos = []
+positions = {'elbow_right': [],
+             'elbow_left': [],
+             'wrist_right': [],
+             'wrist_left': [],
+             }
 
 # Keep track of what type of label was added last
 label_stack = []  
@@ -58,29 +64,21 @@ def add_labeled_image(labeled_image: dict):
 
     # Retreive labels from the dictionary
     image = labeled_image['image']
-    elbow_pos = labeled_image['elbow_pos']
-    wrist_pos = labeled_image['wrist_pos']
+    positions = {"elbow_right": labeled_image["elbow_right"],
+                 "wrist_right": labeled_image["wrist_right"],
+                 "elbow_left": labeled_image["elbow_left"],
+                 "wrist_left": labeled_image["wrist_left"],}
 
     # Write the image to file
     image_name = f'image{num_labeled_images}.png'
     cv2.imwrite(LABELED_IMAGES + image_name, image)
     num_labeled_images += 1
 
-    # Save the single elbow and wrist annotations
-    data = [image_name]
-    labels = image_utils.normalise_single_labels(elbow_pos, wrist_pos)
-    data += labels
-
-    # Write the labels to file
-    with open(LABELS + 'annotations_single.csv', 'a', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(data)
-
     # Save the multiple elbow and wrist annotations
-    labels = image_utils.normalise_multiple_labels(elbow_pos, wrist_pos)
+    labels = image_utils.normalise_multiple_labels(positions)
 
     # Write the labels to file
-    data = [image_name] + np.ndarray.flatten(labels).tolist()
+    data = [image_name] + labels
     with open(LABELS + 'annotations_multi.csv', 'a', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(data)
@@ -105,12 +103,12 @@ def get_center_crop() -> np.ndarray:
     # Get the offset of the crop on the image
     offset_x = int(WIDTH_OFFSET - (x_center - width // 2))
     offset_y = int(HEIGHT_OFFSET - (y_center - height // 2))
-    center_image = image_utils.crop_image(cv_image, start_x=offset_x, start_y=offset_y, width=516, height=516)
+    center_image = image_utils.crop_image(cv_image, start_x=offset_x, start_y=offset_y, width=IMAGE_SIZE+CROP_SIZE, height=IMAGE_SIZE+CROP_SIZE)
 
     return center_image
 
 
-def check_existing_label():
+def check_labeled_images():
     """
     This function checks if an image with the same name hasn't been labeled already.
 
@@ -119,7 +117,6 @@ def check_existing_label():
     Returns:
         bool: A boolean value indicating if saving the image should proceed.
     """
-    print(display_image_name, list(labeled_image_names.keys()))
     if display_image_name in labeled_image_names:
         line = labeled_image_names[display_image_name]
         response = input((f"The image with name '{display_image_name}' was already labeled at some point.\n"
@@ -136,9 +133,9 @@ def check_existing_label():
     return True
 
 
-def write_label_to_file():
+def write_image_name_to_file():
     """
-    Write the original image name to a file
+    Write the original image name to a file.
     """
     if display_image_name not in labeled_image_names:
         labeled_image_names[display_image_name] = num_labeled_images
@@ -172,23 +169,24 @@ def save_labels():
 
     Note:
         This function relies on the following global variables:
-        - `elbow_pos`: List of elbow positions.
-        - `wrist_pos`: List of wrist positions.
+        - `positions`: Dictionary with values being lists of keypoint positionss.
         - `cv_image`: Current image being labeled.
     """
-    continue_answer = check_existing_label()
+    continue_answer = check_labeled_images()
 
     if not continue_answer:
         return
     
-    write_label_to_file()
+    write_image_name_to_file()
 
     # Perform the crops and save the image and labels
     center_image = get_center_crop()
-    labeled_images = image_utils.ten_crop(center_image, elbow_pos, wrist_pos)
+    labeled_images = image_utils.ten_crop(center_image, positions)
     for labeled_image in labeled_images:
         add_labeled_image(labeled_image)
     
+    print("10 images and labels saved successfully!")
+
     delete_display_image()
 
     get_next_image()  # Load and display the next image
@@ -196,75 +194,63 @@ def save_labels():
 
 def draw_labels():
     """
-    Draw all elbow and wrist labels on the canvas making the first one of each a bit bigger in size.
+    Draw all elbow and wrist labels on the canvas.
     """
-    c.delete('elbow', 'wrist')
+    c.delete('elbow_right', 'wrist_right', 'elbow_left', 'wrist_left')
 
     labels = [
-            {"positions": elbow_pos, "fill": "red", "tag": "elbow"},
-            {"positions": wrist_pos, "fill": "green", "tag": "wrist"}
+            {"positions": positions["elbow_right"], "fill": "red", "tag": "elbow_right"},
+            {"positions": positions["wrist_right"], "fill": "green", "tag": "wrist_right"},
+            {"positions": positions["elbow_left"], "fill": "hotpink", "tag": "elbow_left"},
+            {"positions": positions["wrist_left"], "fill": "blue", "tag": "wrist_left"}
     ]
 
     for label in labels:
-        first = True
         for (x, y) in label["positions"]:
             x = x + WIDTH_OFFSET
             y = y + HEIGHT_OFFSET
-            if first:
-                c.create_oval(x-5, y-5, x+5, y+5, fill=label["fill"], tags=label["tag"])
-                first = False
-            else:
-                c.create_oval(x-3, y-3, x+3, y+3, fill=label["fill"], tags=label["tag"])
+            c.create_oval(x-3, y-3, x+3, y+3, fill=label["fill"], tags=label["tag"])
 
 
 def reset():
     # Clears the elbow and wrist labels and deltes the elbow and wrist indicators
-    global elbow_pos, wrist_pos, label_stack
-    elbow_pos, wrist_pos, label_stack = [], [], []
-    c.delete('elbow', 'wrist')
-
+    global positions, label_stack
+    label_stack = []
+    positions = {'elbow_right': [],
+             'elbow_left': [],
+             'wrist_right': [],
+             'wrist_left': [],
+             }
+    c.delete('elbow_right', 'wrist_right', 'elbow_left', 'wrist_left')
+    print("All keypoints removed!")
 
 def on_backspace(event):
     # On backspace press call undo_label
     undo_label()
 
+def on_enter(event):
+    # On backspace press call undo_label
+    save_labels()
+
 def undo_label():
     # Undos the last placed label
-    global elbow_pos, wrist_pos, label_stack
+    global positions, label_stack
     if label_stack:
-        if label_stack.pop() == "elbow":
-            elbow_pos.pop()
-        else:
-            wrist_pos.pop()
-
+        name = label_stack.pop()
+        positions[name].pop()
         draw_labels()
+        print("Last keypoint removed!")
     else:
         print("There is no more labels to undo!")
 
-
-def elbow(event):
+def place_keypoint(event, name, colour):
     # Store the position of the elbow and highlight it on the canvas
-    global elbow_pos
+    global positions
     x, y = event.x, event.y
-    if elbow_pos == []:
-        c.create_oval(x-5, y-5, x+5, y+5, fill='red', tags='elbow')
-    else:
-        c.create_oval(x-3, y-3, x+3, y+3, fill='red', tags='elbow')       
-    elbow_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
-    label_stack.append("elbow")
-
-
-def wrist(event):
-    # Store the position of the wrist and highlight it on the canvas
-    global wrist_pos
-    x, y = event.x, event.y
-    if wrist_pos == []:
-        c.create_oval(x-5, y-5, x+5, y+5, fill='green', tags='wrist')
-    else:
-        c.create_oval(x-3, y-3, x+3, y+3, fill='green', tags='wrist')    
-    wrist_pos.append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
-    label_stack.append("wrist")
-
+    c.create_oval(x-3, y-3, x+3, y+3, fill=colour, tags=name)       
+    positions[name].append((x - WIDTH_OFFSET, y - HEIGHT_OFFSET))
+    label_stack.append(name)
+    print("Keypoint added!")
 
 def drag_start(event):
     """
@@ -297,6 +283,7 @@ def get_next_image():
     This function reads in and dispalys the next image.
     """
     global cv_image, display_image_id, display_image, display_image_name
+    print("Im getting the next image!")
 
     reset()  # Reset labels
     display_image_name = next(images).name
@@ -305,6 +292,7 @@ def get_next_image():
     c.delete("display_image_tag")
     display_image_id = c.create_image(CANVAS_WIDTH // 2, CANVAS_HEIGHT // 2, anchor='c', image=display_image, tags="display_image_tag")
     c.tag_lower("display_image_tag")
+    print("Ready to label!")
 
 
 def count_labeled_images():
@@ -319,6 +307,7 @@ def count_labeled_images():
 def draw_on_canvas():
     # This function draws all the baseline objects on the canvas. 
     # This includes the highlighted center crop 516x516 area and the legend in the top left.
+    print("Creating canvas!")
 
     # Highlight the center crop 
     c.create_rectangle(0, 0, CANVAS_WIDTH, HEIGHT_OFFSET, fill='black', stipple='gray75')
@@ -345,14 +334,19 @@ def main():
     get_next_image()
 
     # Specify mouse button binds
-    c.bind('<Button-1>', elbow)
-    c.bind('<Button-3>', wrist)
+    c.focus_set()
+    c.bind('<Button-1>', lambda event: place_keypoint(event, "elbow_right", "red"))
+    c.bind('<Button-3>', lambda event: place_keypoint(event, "wrist_right", "green"))
+    c.bind("q", lambda event: place_keypoint(event, "elbow_left", "hotpink"))
+    c.bind("w", lambda event: place_keypoint(event, "wrist_left", "blue"))
 
-    c.bind('<Button-2>', drag_start)
-    c.bind('<B2-Motion>', drag)
+    c.bind_all('<Button-2>', drag_start)
+    c.bind_all('<B2-Motion>', drag)
 
     # Bind the Backspace key
     c.bind_all("<BackSpace>", on_backspace)
+
+    c.bind_all("<Return>", on_enter)
 
     # Create buttons
     button1 = tk.Button(text="Reset", command=reset)

@@ -16,17 +16,60 @@ from models.yolo import MyIKeypoint
 from my_utils import *
 
 class CustomDataset(Dataset):
-    def __init__(self, data):
+    def __init__(self, data, targets):
         self.data = data
+        self.targets = targets
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        sample = self.data[idx]
-        # Load and preprocess sample here
-        return sample
+        return self.data[idx]
+    
+    def get_target(self, idx, x_num_cells, y_num_cells):
+        """
+        Gets targets far a dataset with a specific index and specific scale.
 
+        Parameters:
+            idx (int): The index of the datapoint to get the target for.
+            x_num_cells (int): Number of grid cells in the x direction to preprocess the targets for.
+            x_num_cells (int): Number of grid cells in the y direction to preprocess the targets for.
+
+        Returns: 
+            torch.Tensor: A tensor of shape (x_num_cells, y_num_cells, 6) representing the target for the supplied index.
+        """
+        elbows, wrists = self.targets[idx]['elbows'], self.targets[idx]['wrists']
+
+        # Create empty x x y x 6 tensor
+        targets = np.zeros((x_num_cells, y_num_cells, 6))
+
+        # Format and normalise labels
+        for x, y in elbows:
+            # Calculate the cell sizes
+            x_cell_size = 1 / x_num_cells 
+            y_cell_size = 1 / y_num_cells
+            # Figure out which box the label belongs to
+            box_x = x // x_cell_size
+            box_y = y // y_cell_size
+            # Normalise the width and height within the box
+            value_x = round((x % x_cell_size) / x_cell_size, 3)
+            value_y = round((y % x_cell_size) / x_cell_size, 3)
+            targets[box_x,box_y,:3] = [value_x, value_y, 1]
+        
+        for x, y in wrists:
+            # Calculate the cell sizes
+            x_cell_size = 1 / x_num_cells 
+            y_cell_size = 1 / y_num_cells
+            # Figure out which box the label belongs to
+            box_x = x // x_cell_size
+            box_y = y // y_cell_size
+            # Normalise the width and height within the box
+            value_x = round((x % x_cell_size) / x_cell_size, 3)
+            value_y = round((y % x_cell_size) / x_cell_size, 3)
+            targets[box_x,box_y,3:] = [value_x, value_y, 1]
+
+        return targets
+        
 
 class CustomLoss(nn.Module):
     def __init__(self):
