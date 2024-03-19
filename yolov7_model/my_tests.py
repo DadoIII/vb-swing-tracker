@@ -1,8 +1,8 @@
 import unittest
 import torch
-import math
+import numpy as np
 
-from keypoint_finetune import CustomLoss
+from keypoint_finetune import CustomLoss, CustomDataset
 
 class TestTenCropLabeling(unittest.TestCase):
     custom_loss = CustomLoss()
@@ -45,6 +45,26 @@ class TestTenCropLabeling(unittest.TestCase):
             except AssertionError:
                 print(f"Failed for pred: {pred}, true: {true}, expected_loss: {loss}, computed_loss: {computed_loss}")
                 raise  # Re-raise the AssertionError to stop the test
+
+    def test_get_targets(self):
+        custom_dataset = CustomDataset([], [{"elbows_right": [(0.5, 0.5), (0.2, 0.1)], 
+                                             "wrists_right": [], 
+                                             "elbows_left":  [(0.2, 0.1)], 
+                                             "wrists_left":  [(0.15, 0.25)]}])
+
+
+        true_target = np.zeros((10, 10, 12))
+        true_target[5,5,:3] = [0,0,1]
+        true_target[2,1,:3] = [0,0,1]
+        true_target[2,1,6:9] = [0,0,1]
+        true_target[1,2,9:] = [0.5,0.5,1]
+
+        try:
+            self.assertTrue(np.array_equal(custom_dataset.get_target(0, 10, 10), true_target))
+        except AssertionError:
+            np.set_printoptions(threshold=10_000)
+            print(f"Test failed predicted target:\n{custom_dataset.get_target(0, 10, 10)}\nTrue target:\n{true_target}")
+            raise  # Re-raise the AssertionError to stop the test
 
 
 if __name__ == '__main__':

@@ -26,7 +26,7 @@ class CustomDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
     
-    def get_target(self, idx, x_num_cells, y_num_cells):
+    def get_target(self, idx: int, x_num_cells: int, y_num_cells: int):
         """
         Gets targets far a dataset with a specific index and specific scale.
 
@@ -38,37 +38,26 @@ class CustomDataset(Dataset):
         Returns: 
             torch.Tensor: A tensor of shape (x_num_cells, y_num_cells, 6) representing the target for the supplied index.
         """
-        elbows, wrists = self.targets[idx]['elbows'], self.targets[idx]['wrists']
+        targets = self.targets[idx]
 
-        # Create empty x x y x 6 tensor
-        targets = np.zeros((x_num_cells, y_num_cells, 6))
+        # Create empty x x y x 12 tensor
+        processed_targets = np.zeros((x_num_cells, y_num_cells, 12))
 
         # Format and normalise labels
-        for x, y in elbows:
-            # Calculate the cell sizes
-            x_cell_size = 1 / x_num_cells 
-            y_cell_size = 1 / y_num_cells
-            # Figure out which box the label belongs to
-            box_x = x // x_cell_size
-            box_y = y // y_cell_size
-            # Normalise the width and height within the box
-            value_x = round((x % x_cell_size) / x_cell_size, 3)
-            value_y = round((y % x_cell_size) / x_cell_size, 3)
-            targets[box_x,box_y,:3] = [value_x, value_y, 1]
-        
-        for x, y in wrists:
-            # Calculate the cell sizes
-            x_cell_size = 1 / x_num_cells 
-            y_cell_size = 1 / y_num_cells
-            # Figure out which box the label belongs to
-            box_x = x // x_cell_size
-            box_y = y // y_cell_size
-            # Normalise the width and height within the box
-            value_x = round((x % x_cell_size) / x_cell_size, 3)
-            value_y = round((y % x_cell_size) / x_cell_size, 3)
-            targets[box_x,box_y,3:] = [value_x, value_y, 1]
+        for i, values in enumerate(targets.values()):
+            for (x, y) in values:
+                # Calculate the cell sizes
+                x_cell_size = 1 / x_num_cells 
+                y_cell_size = 1 / y_num_cells
+                # Figure out which box the label belongs to
+                box_x = int((x * 10) / (x_cell_size * 10))  # Multiplying by 10 because of limited floating-point precision
+                box_y = int((y * 10) / (y_cell_size * 10))
+                # Normalise the width and height within the box
+                value_x = round(((x * 10) % (x_cell_size * 10)) / (x_cell_size * 10), 3)
+                value_y = round(((y * 10) % (x_cell_size * 10)) / (x_cell_size * 10), 3)
+                processed_targets[box_x,box_y, i*3: i*3+3] = [value_x, value_y, 1]
 
-        return targets
+        return processed_targets
         
 
 class CustomLoss(nn.Module):
