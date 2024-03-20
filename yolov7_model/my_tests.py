@@ -47,10 +47,10 @@ class TestTenCropLabeling(unittest.TestCase):
                 raise  # Re-raise the AssertionError to stop the test
 
     def test_get_targets(self):
-        custom_dataset = CustomDataset([], [{"elbows_right": [(0.5, 0.5), (0.2, 0.1)], 
-                                             "wrists_right": [], 
-                                             "elbows_left":  [(0.2, 0.1)], 
-                                             "wrists_left":  [(0.15, 0.25)]}])
+        custom_dataset = CustomDataset([], [[[(0.5, 0.5), (0.2, 0.1)], # elbows_right
+                                             [],                       # wrists_right
+                                             [(0.2, 0.1)],             # elbows_left  
+                                             [(0.15, 0.25)]]])          # wrists_left
 
 
         true_target = np.zeros((10, 10, 12))

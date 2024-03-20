@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import cv2
+import csv
 import numpy as np
 from torchvision import transforms
 from typing import List
@@ -16,15 +17,24 @@ from models.yolo import MyIKeypoint
 from my_utils import *
 
 class CustomDataset(Dataset):
-    def __init__(self, data, targets):
+    def __init__(self, data, targets, image_folder, device="cpu"):
         self.data = data
         self.targets = targets
+        self.device = device
+        self.image_folder = image_folder
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        return self.data[idx]
+        image = cv2.imread(self.image_folder + self.data[idx])
+        #image = letterbox(image, 960, stride=64, auto=True)[0]
+        image = transforms.ToTensor()(image)
+        image = torch.tensor(np.array([image.numpy()]))
+        if torch.cuda.is_available():
+            image = image.half().to(self.device)
+
+        return image
     
     def get_target(self, idx: int, x_num_cells: int, y_num_cells: int):
         """
@@ -44,7 +54,7 @@ class CustomDataset(Dataset):
         processed_targets = np.zeros((x_num_cells, y_num_cells, 12))
 
         # Format and normalise labels
-        for i, values in enumerate(targets.values()):
+        for i, values in enumerate(targets):
             for (x, y) in values:
                 # Calculate the cell sizes
                 x_cell_size = 1 / x_num_cells 
@@ -126,21 +136,36 @@ class CustomLoss(nn.Module):
         else:
             loss_x_wrist = loss_y_wrist = torch.tensor(0.0, device=pred.device)
         
-        #print(F.binary_cross_entropy(torch.Tensor([0]), torch.Tensor([1])))
         # Compute the confidence loss for the elbow and wrist
         loss_conf_elbow = F.binary_cross_entropy(pred_conf_elbow.view(-1), target_conf_elbow.view(-1))
         loss_conf_wrist = F.binary_cross_entropy(pred_conf_wrist.view(-1), target_conf_wrist.view(-1))
         
-        # Aggregate the losses for elbow and wrist
-        # print(loss_x_elbow)
-        # print(loss_y_elbow)
-        # print(loss_x_wrist)
-        # print(loss_y_wrist)
-        # print(loss_conf_elbow)
-        # print(loss_conf_wrist)
         scale_loss = loss_x_elbow + loss_y_elbow + loss_x_wrist + loss_y_wrist + loss_conf_elbow + loss_conf_wrist
         
         return scale_loss
+
+
+def read_csv_file(file_path):
+    image_names = []  # List to store the data read from the CSV file
+    targets = []
+
+    with open(file_path, 'r') as csv_file:
+        csv_reader = csv.reader(csv_file)
+
+        for row in csv_reader:
+            image_names.append(row[0])
+
+            row_list = []  # List of all keypoints for each image
+            for keypoints in row[1:]:
+                temp_list = []  # List of one type of keypoints
+                keypoints = keypoints.split(" ")
+                if len(keypoints) > 1:
+                    for i in range(0,len(keypoints), 2):
+                        temp_list.append((int(keypoints[i]), int(keypoints[i+1])))
+                row_list.append(temp_list)
+            targets.append(row_list)
+
+    return image_names, targets
 
 def run_epoch(model, optimiser):
     pass
@@ -152,6 +177,13 @@ def main():
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
     
+    image_names, targets = read_csv_file("../images/labels/annotations_single.csv")
+
+    # Create dataset
+    batch_size = 4
+    labeled_image_folder = "../images/labeled_images"
+    dataset = CustomDataset(image_names, targets, labeled_image_folder, "gpu")
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     layer = MyIKeypoint(ch=(256, 512, 768, 1024))
     layer.f = [114, 115, 116, 117]
@@ -163,7 +195,7 @@ def main():
         param.requires_grad = False
 
     # Make parameters of the last layers trainable
-    for param in model[-1].parameters():
+    for param in model.model[-1].parameters():
         param.requires_grad = True
 
     if torch.cuda.is_available():
@@ -172,7 +204,8 @@ def main():
     optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001)
 
     for epoch in range(num_epochs):
-        run_epoch(model, optimiser)
+        #run_epoch(model, optimiser)
+        pass
 
 if __name__ == "__main__":
     main()
