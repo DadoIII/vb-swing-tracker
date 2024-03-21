@@ -78,7 +78,7 @@ class CustomLoss(nn.Module):
         """
         Compute the custom loss between model predictions and ground truth targets.
         
-        Args:
+        Parameters:
             predictions (list): List of tensors containing model predictions at each scale.
                                 Shape: [(bs, x1, y1, 6), (bs, x2, y2, 6), ..., (bs, xn, yn, 6)]
             targets (list): List of tensors containing ground truth targets at each scale.
@@ -105,7 +105,7 @@ class CustomLoss(nn.Module):
         """
         Compute the loss for a single scale.
         
-        Args:
+        Parameters:
             pred (tensor): Predictions tensor for a single scale.
                            Shape: (bs, x, y, 6)
             target (tensor): Ground truth targets tensor for a single scale.
