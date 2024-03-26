@@ -79,7 +79,14 @@ def ten_crop(image: np.ndarray, positions: Dict[str, List[Tuple[int, int]]], cro
         # Flip each image + elbow and wrist positions horizontally
         flipped_image = cv2.flip(cropped_image, 1)  # Flip image horizontally
         # Get the new elbow positions after the flip
-        flipped_positions = {key: [(crop_width - 1 - x, y) for (x, y) in value] for key, value in cropped_positions.items()} 
+        left_elbows = [(crop_width - 1 - x, y) for (x, y) in cropped_positions["elbow_right"]]
+        left_wrists = [(crop_width - 1 - x, y) for (x, y) in cropped_positions["wrist_right"]]
+        right_elbows = [(crop_width - 1 - x, y) for (x, y) in cropped_positions["elbow_left"]]
+        right_wrists = [(crop_width - 1 - x, y) for (x, y) in cropped_positions["wrist_left"]]
+        flipped_positions = {"elbow_right": right_elbows,
+                             "wrist_right": right_wrists,
+                             "elbow_left": left_elbows,
+                             "wrist_left": left_wrists} 
         dic = compile_to_dict(flipped_image, flipped_positions)
         labeled_images.append(dic)
 
