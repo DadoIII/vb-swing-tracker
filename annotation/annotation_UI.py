@@ -22,7 +22,7 @@ labeled_image_names = {}
 with open(LABELS + "labeled_image_names.txt", "r") as f:
     for line_num, name in enumerate(f, start=0):
         name = name.strip()
-        labeled_image_names[name] = line_num
+        labeled_image_names[name] = line_num * 10
 
 # Specify canvas dimensions
 CANVAS_WIDTH = 1920
@@ -120,7 +120,7 @@ def check_labeled_images():
     if display_image_name in labeled_image_names:
         line = labeled_image_names[display_image_name]
         response = input((f"The image with name '{display_image_name}' was already labeled at some point.\n"
-                          f"It was labeled as image number {line}. That should correspond to images image{line * 10}.png - image{line * 10 + 9}.png.\n"
+                          f"It was labeled as image number {line // 10}. That should correspond to images image{line}.png - image{line + 9}.png.\n"
                           f"I suggest to check that this is a different image with the same name. Do you still want to proceed? Y/N: "
         ))
         
@@ -128,7 +128,7 @@ def check_labeled_images():
             print("Continuing normally.")
             return True
         else:
-            print("Did not label this image.")
+            print("Did not save this image.")
             return False
     return True
 
@@ -176,8 +176,6 @@ def save_labels():
 
     if not continue_answer:
         return
-    
-    write_image_name_to_file()
 
     # Perform the crops and save the image and labels
     center_image = get_center_crop()
@@ -186,6 +184,8 @@ def save_labels():
         add_labeled_image(labeled_image)
     
     print("10 images and labels saved successfully!")
+
+    write_image_name_to_file()
 
     delete_display_image()
 
@@ -316,11 +316,16 @@ def draw_on_canvas():
     c.create_rectangle(CANVAS_WIDTH, 0, CANVAS_WIDTH - WIDTH_OFFSET, CANVAS_HEIGHT, fill='black', stipple='gray75')
 
     # Draw the legend
-    c.create_rectangle(0,0,60,25, fill='white')
+    c.create_rectangle(0,0,85,50, fill='white')
     c.create_oval(4, 4, 10, 10, fill='red', tags='legend')
-    c.create_text(35, 7, text='= elbow', tags='legend')
+    c.create_text(48, 7, text='= elbow right', tags='legend')
     c.create_oval(4, 14, 10, 20, fill='green', tags='legend')
-    c.create_text(32, 17, text='= wrist', tags='legend')
+    c.create_text(45, 17, text='= wrist right', tags='legend')
+
+    c.create_oval(4, 24, 10, 30, fill='hotpink', tags='legend')
+    c.create_text(45, 27, text='= elbow left', tags='legend')
+    c.create_oval(4, 34, 10, 40, fill='blue', tags='legend')
+    c.create_text(42, 37, text='= wrist left', tags='legend')
 
 
 def main():
