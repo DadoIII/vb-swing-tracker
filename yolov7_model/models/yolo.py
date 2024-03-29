@@ -853,7 +853,7 @@ class MyIKeypoint(nn.Module):
     export = False
     stride = None
 
-    def __init__(self, nc=1, anchors=(), nkpt=2, ch=(), inplace=True, dw_conv_kpt=True):  # detection layer
+    def __init__(self, nc=1, anchors=(), nkpt=4, ch=(), inplace=True, dw_conv_kpt=True):  # detection layer
         super(MyIKeypoint, self).__init__()
         self.nkpt = nkpt
         self.dw_conv_kpt = dw_conv_kpt
@@ -869,7 +869,7 @@ class MyIKeypoint(nn.Module):
                                           DWConv(x, x, k=3), Conv(x, x),
                                           DWConv(x, x, k=3), nn.Conv2d(x, self.no_kpt, 1)) for x in ch)
             else: #keypoint head is a single convolution
-                self.m_kpt = nn.ModuleList(nn.Conv2d(x, 6, 1) for x in ch)
+                self.m_kpt = nn.ModuleList(nn.Conv2d(x, 12, 1) for x in ch)
 
     def forward(self, x):
         z = []  # inference output
@@ -878,7 +878,7 @@ class MyIKeypoint(nn.Module):
             x[i] = self.m_kpt[i](x[i])
 
             bs, _, ny, nx = x[i].shape
-            x[i] = x[i].view(bs, 6, ny, nx).permute(0, 2, 3, 1).contiguous()
+            x[i] = x[i].view(bs, self.no_kpt, ny, nx).permute(0, 2, 3, 1).contiguous()
 
             if not self.training:  # inference
                 if self.nkpt != 0:

@@ -4,37 +4,37 @@ import numpy as np
 
 from keypoint_finetune import CustomLoss, CustomDataset
 
-class TestTenCropLabeling(unittest.TestCase):
+class TestLossAndDataset(unittest.TestCase):
     custom_loss = CustomLoss()
 
     def test_single_label(self):
         tests = [
-            (torch.Tensor([10, 10, 1, 25, 25, 1]).view(1,1,1,6),
-             torch.Tensor([10, 10, 1, 25, 25, 1]).view(1,1,1,6),  # Same tensors with detection
+            (torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  
+             torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Same tensors with detection 
              0),
-            (torch.Tensor([10, 10, 0, 25, 25, 0]).view(1,1,1,6),
-             torch.Tensor([10, 10, 0, 25, 25, 0]).view(1,1,1,6),  # Same tensors without detection
+            (torch.Tensor([10, 10, 0, 25, 25, 0] + [0]*6).view(1,1,1,12),
+             torch.Tensor([10, 10, 0, 25, 25, 0] + [0]*6).view(1,1,1,12),  # Same tensors without detection
              0),
-            (torch.Tensor([100, 100, 0, 250, 250, 0]).view(1,1,1,6),
-             torch.Tensor([10, 10, 0, 25, 25, 0]).view(1,1,1,6),  # No detection different positions
+            (torch.Tensor([100, 100, 0, 250, 250, 0] + [0]*6).view(1,1,1,12),
+             torch.Tensor([10, 10, 0, 25, 25, 0] + [0]*6).view(1,1,1,12),  # No detection different positions
              0),
-            (torch.Tensor([10, 10, 0, 25, 25, 1]).view(1,1,1,6),
-             torch.Tensor([10, 10, 1, 25, 25, 1]).view(1,1,1,6),  # Different confidence
+            (torch.Tensor([10, 10, 0, 25, 25, 1] + [0]*6).view(1,1,1,12),
+             torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Different confidence
              100),
-            (torch.Tensor([10, 10, 1, 25, 25, 0]).view(1,1,1,6),
-             torch.Tensor([10, 10, 1, 25, 25, 1]).view(1,1,1,6),  # Different confidence
+            (torch.Tensor([10, 10, 1, 25, 25, 0] + [0]*6).view(1,1,1,12),
+             torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Different confidence
              100),
-            (torch.Tensor([100, 100, 1, 250, 250, 1]).view(1,1,1,6),
-             torch.Tensor([10, 10, 0, 25, 25, 0]).view(1,1,1,6),  # No detection, different confidence and positions
+            (torch.Tensor([100, 100, 1, 250, 250, 1] + [0]*6).view(1,1,1,12),
+             torch.Tensor([10, 10, 0, 25, 25, 0] + [0]*6).view(1,1,1,12),  # No detection, different confidence and positions
              200),
-            (torch.Tensor([15, 15, 1, 30, 30, 1]).view(1,1,1,6),
-             torch.Tensor([10, 10, 1, 25, 25, 1]).view(1,1,1,6),  # Detection with different positions
+            (torch.Tensor([15, 15, 1, 30, 30, 1] + [0]*6).view(1,1,1,12),
+             torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Detection with different positions
              4 * 25),
-            (torch.Tensor([15, 15, 0, 30, 30, 0]).view(1,1,1,6),
-             torch.Tensor([10, 10, 1, 25, 25, 1]).view(1,1,1,6),  # Detection with different confidence and positions
+            (torch.Tensor([15, 15, 0, 30, 30, 0] + [0]*6).view(1,1,1,12),
+             torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Detection with different confidence and positions
              4 * 25 + 2 * 100),
-            (torch.Tensor([15, 15, 0, 30, 30, 0] * 8).view(2,2,2,6),
-             torch.Tensor([10, 10, 1, 25, 25, 1] * 8).view(2,2,2,6),  # Multiple batches and grid cells
+            (torch.Tensor(([15, 15, 0, 30, 30, 0] + [0]*6) * 8).view(2,2,2,12),
+             torch.Tensor(([10, 10, 1, 25, 25, 1] + [0]*6) * 8).view(2,2,2,12),  # Multiple batches and grid cells
              4 * 25 + 2 * 100),
         ]
 
@@ -50,7 +50,8 @@ class TestTenCropLabeling(unittest.TestCase):
         custom_dataset = CustomDataset([], [[[(0.5, 0.5), (0.2, 0.1)], # elbows_right
                                              [],                       # wrists_right
                                              [(0.2, 0.1)],             # elbows_left  
-                                             [(0.15, 0.25)]]])          # wrists_left
+                                             [(0.15, 0.25)]]],         # wrists_left
+                                        "", [])
 
 
         true_target = np.zeros((10, 10, 12))

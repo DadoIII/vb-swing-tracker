@@ -17,11 +17,12 @@ from models.yolo import MyIKeypoint
 from my_utils import *
 
 class CustomDataset(Dataset):
-    def __init__(self, data, targets, image_folder, device="cpu"):
+    def __init__(self, data, targets, image_folder, scales, device="cpu"):
         self.data = data
         self.targets = targets
         self.device = device
         self.image_folder = image_folder
+        self.scales = scales
 
     def __len__(self):
         return len(self.data)
@@ -30,11 +31,14 @@ class CustomDataset(Dataset):
         image = cv2.imread(self.image_folder + self.data[idx])
         #image = letterbox(image, 960, stride=64, auto=True)[0]
         image = transforms.ToTensor()(image)
-        image = torch.tensor(np.array([image.numpy()]))
         if torch.cuda.is_available():
             image = image.half().to(self.device)
 
-        return image
+        targets = []
+        for (x, y) in self.scales:
+            targets.append(self.get_target(idx, x, y))
+
+        return image, targets
     
     def get_target(self, idx: int, x_num_cells: int, y_num_cells: int):
         """
@@ -51,7 +55,7 @@ class CustomDataset(Dataset):
         targets = self.targets[idx]
 
         # Create empty x x y x 12 tensor
-        processed_targets = np.zeros((x_num_cells, y_num_cells, 12))
+        processed_targets = torch.zeros((x_num_cells, y_num_cells, 12)).half()
 
         # Format and normalise labels
         for i, values in enumerate(targets):
@@ -65,9 +69,9 @@ class CustomDataset(Dataset):
                 # Normalise the width and height within the box
                 value_x = round(((x * 10) % (x_cell_size * 10)) / (x_cell_size * 10), 3)
                 value_y = round(((y * 10) % (x_cell_size * 10)) / (x_cell_size * 10), 3)
-                processed_targets[box_x,box_y, i*3: i*3+3] = [value_x, value_y, 1]
+                processed_targets[box_x,box_y, i*3: i*3+3] = torch.tensor([value_x, value_y, 1]).half()
 
-        return processed_targets
+        return processed_targets.to(self.device)
         
 
 class CustomLoss(nn.Module):
@@ -107,46 +111,49 @@ class CustomLoss(nn.Module):
         
         Parameters:
             pred (tensor): Predictions tensor for a single scale.
-                           Shape: (bs, x, y, 6)
+                           Shape: (bs, x, y, 12)
             target (tensor): Ground truth targets tensor for a single scale.
-                             Shape: (bs, x, y, 6)
+                             Shape: (bs, x, y, 12)
         
         Returns:
             scale_loss (tensor): Scalar tensor representing the computed loss for the scale.
         """
 
-        pred_x_elbow, pred_y_elbow, pred_conf_elbow, pred_x_wrist, pred_y_wrist, pred_conf_wrist = torch.split(pred, 1, dim=-1)
-        target_x_elbow, target_y_elbow, target_conf_elbow, target_x_wrist, target_y_wrist, target_conf_wrist = torch.split(target, 1, dim=-1)
-        
-        # Compute the mask for reliable predictions based on ground truth confidence scores
-        mask_elbow = (target_conf_elbow == 1).squeeze(-1)
-        mask_wrist = (target_conf_wrist == 1).squeeze(-1)
-        
-        # Compute the positional loss for the elbow (considering only confident predictions)
-        if mask_elbow.nonzero().numel() > 0:
-            loss_x_elbow = F.mse_loss(pred_x_elbow[mask_elbow], target_x_elbow[mask_elbow])
-            loss_y_elbow = F.mse_loss(pred_y_elbow[mask_elbow], target_y_elbow[mask_elbow])
-        else:
-            loss_x_elbow = loss_y_elbow = torch.tensor(0.0, device=pred.device)
+        # Define the number of keypoints
+        num_keypoints = 4
 
-        # Compute the positional loss for the wrist (considering only confident predictions)
-        if mask_wrist.nonzero().numel() > 0:
-            loss_x_wrist = F.mse_loss(pred_x_wrist[mask_wrist], target_x_wrist[mask_wrist])
-            loss_y_wrist = F.mse_loss(pred_y_wrist[mask_wrist], target_y_wrist[mask_wrist])
-        else:
-            loss_x_wrist = loss_y_wrist = torch.tensor(0.0, device=pred.device)
-        
-        # Compute the confidence loss for the elbow and wrist
-        loss_conf_elbow = F.binary_cross_entropy(pred_conf_elbow.view(-1), target_conf_elbow.view(-1))
-        loss_conf_wrist = F.binary_cross_entropy(pred_conf_wrist.view(-1), target_conf_wrist.view(-1))
-        
-        scale_loss = loss_x_elbow + loss_y_elbow + loss_x_wrist + loss_y_wrist + loss_conf_elbow + loss_conf_wrist
+        # Split predictions and targets into separate tensors for each keypoint
+        pred = pred.split(3, dim=-1)  # Split along the last dimension
+        target = target.split(3, dim=-1)
+        scale_loss = 0.0
+
+        # Compute loss for each keypoint
+        for i in range(num_keypoints):
+            pred_x, pred_y,  pred_conf = pred[i][:, :, :, 0], pred[i][:, :, :, 1], pred[i][:, :, :, 2]
+            target_x, target_y,  target_conf = target[i][:, :, :, 0], target[i][:, :, :, 1], target[i][:, :, :, 2]
+
+            # Compute the mask for reliable predictions based on ground truth confidence scores
+            mask = (target_conf == 1).squeeze(-1)
+
+            # Compute the positional loss for the current keypoint (considering only ground truth keypoints)
+            if mask.nonzero().numel() > 0:
+                loss_x = F.mse_loss(pred_x[mask], target_x[mask])
+                loss_y = F.mse_loss(pred_y[mask], target_y[mask])
+            else:
+                loss_x = loss_y = torch.tensor(0.0, device=pred[i].device)
+
+            # Compute the confidence loss for the current keypoint
+            loss_conf = F.binary_cross_entropy(pred_conf.view(-1), target_conf.view(-1))
+
+            # Accumulate the losses
+            keypoint_loss = loss_x + loss_y + loss_conf
+            scale_loss += keypoint_loss
         
         return scale_loss
 
 
 def read_csv_file(file_path):
-    image_names = []  # List to store the data read from the CSV file
+    image_names = []
     targets = []
 
     with open(file_path, 'r') as csv_file:
@@ -161,29 +168,58 @@ def read_csv_file(file_path):
                 keypoints = keypoints.split(" ")
                 if len(keypoints) > 1:
                     for i in range(0,len(keypoints), 2):
-                        temp_list.append((int(keypoints[i]), int(keypoints[i+1])))
+                        temp_list.append((float(keypoints[i]), float(keypoints[i+1])))
                 row_list.append(temp_list)
             targets.append(row_list)
 
     return image_names, targets
 
-def run_epoch(model, optimiser):
-    pass
+def run_epoch(model, dataloader, optimiser, criterion):
+    model.train()
+    epoch_loss = 0.0
+
+    for batch_idx, (images, targets) in enumerate(dataloader):
+        # Zero the gradients
+        optimiser.zero_grad()
+
+        # Forward pass
+        outputs = model(images)
+
+        # Compute loss
+        loss = criterion(outputs, targets)
+
+        # Backward pass
+        loss.backward()
+
+        # Update weights
+        optimiser.step()
+
+        # Accumulate loss
+        epoch_loss += loss.item()
+
+    # Calculate average epoch loss
+    epoch_loss /= len(dataloader)
+
+    return epoch_loss
 
 def main():
-    num_epochs = 100
+    num_epochs = 15
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
     
-    image_names, targets = read_csv_file("../images/labels/annotations_single.csv")
+    image_names, targets = read_csv_file("../images/labels/annotations_multi.csv")
 
     # Create dataset
     batch_size = 4
-    labeled_image_folder = "../images/labeled_images"
-    dataset = CustomDataset(image_names, targets, labeled_image_folder, "gpu")
+    labeled_image_folder = "../images/labeled_images/"
+    scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
+    dataset = CustomDataset(image_names, targets, labeled_image_folder, scales, device)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    #Initialise loss
+    criterion = CustomLoss()
 
     layer = MyIKeypoint(ch=(256, 512, 768, 1024))
     layer.f = [114, 115, 116, 117]
@@ -204,8 +240,9 @@ def main():
     optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001)
 
     for epoch in range(num_epochs):
-        #run_epoch(model, optimiser)
-        pass
+        epoch_loss = run_epoch(model, dataloader, optimiser, criterion)
+        print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}')
+        
 
 if __name__ == "__main__":
     main()
