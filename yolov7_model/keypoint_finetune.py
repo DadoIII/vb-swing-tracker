@@ -84,15 +84,15 @@ class CustomLoss(nn.Module):
         
         Parameters:
             predictions (list): List of tensors containing model predictions at each scale.
-                                Shape: [(bs, x1, y1, 6), (bs, x2, y2, 6), ..., (bs, xn, yn, 6)]
+                                Shape: [(bs, x1, y1, 12), (bs, x2, y2, 12), ..., (bs, xn, yn, 12)]
             targets (list): List of tensors containing ground truth targets at each scale.
-                            Shape: [(bs, x1, y1, 6), (bs, x2, y2, 6), ..., (bs, xn, yn, 6)]
+                            Shape: [(bs, x1, y1, 12), (bs, x2, y2, 12), ..., (bs, xn, yn, 12)]
         
         Returns:
             loss (tensor): Scalar tensor representing the computed loss.
         """
         total_loss = 0.0
-        
+
         # Loop through predictions and targets at each scale
         for pred, target in zip(predictions, targets):
             # Compute the loss for each scale (you can use any suitable loss function)
@@ -101,7 +101,7 @@ class CustomLoss(nn.Module):
             total_loss += scale_loss
         
         # Average the losses across scales
-        average_loss = total_loss / self.num_scales
+        average_loss = total_loss / len(predictions)
         
         return average_loss
 
@@ -122,10 +122,17 @@ class CustomLoss(nn.Module):
         # Define the number of keypoints
         num_keypoints = 4
 
+        #print("---------- pred ------------")
+        #print(pred.view(-1)[:50])
+        #print("---------- target ------------")
+        #print(target.view(-1)[:50])
+
         # Split predictions and targets into separate tensors for each keypoint
         pred = pred.split(3, dim=-1)  # Split along the last dimension
         target = target.split(3, dim=-1)
         scale_loss = 0.0
+
+        confidence_criterion = nn.BCEWithLogitsLoss(reduction='mean')
 
         # Compute loss for each keypoint
         for i in range(num_keypoints):
@@ -143,12 +150,17 @@ class CustomLoss(nn.Module):
                 loss_x = loss_y = torch.tensor(0.0, device=pred[i].device)
 
             # Compute the confidence loss for the current keypoint
-            loss_conf = F.binary_cross_entropy(pred_conf.view(-1), target_conf.view(-1))
+            #loss_conf = F.binary_cross_entropy(pred_conf.view(-1), target_conf.view(-1))
+            
+            loss_conf = confidence_criterion(pred_conf, target_conf)
 
             # Accumulate the losses
             keypoint_loss = loss_x + loss_y + loss_conf
+            #print("loss x:", loss_x)
+            #print("loss y:", loss_y)
+            #print("loss conf:", loss_conf)
             scale_loss += keypoint_loss
-        
+            
         return scale_loss
 
 
@@ -191,6 +203,11 @@ def run_epoch(model, dataloader, optimiser, criterion):
         # Backward pass
         loss.backward()
 
+        # Print gradients for each parameter
+        # for name, param in model.named_parameters():
+        #     if param.grad is not None:
+        #         print(f'Parameter: {name}, Mean Gradient: {param.grad.mean()}, Max Gradient: {param.grad.abs().max()}')
+
         # Update weights
         optimiser.step()
 
@@ -212,11 +229,12 @@ def main():
     image_names, targets = read_csv_file("../images/labels/annotations_multi.csv")
 
     # Create dataset
-    batch_size = 4
+    batch_size = 6
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     dataset = CustomDataset(image_names, targets, labeled_image_folder, scales, device)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    subset_dataset = dataset[:6]
+    dataloader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=False)
 
     #Initialise loss
     criterion = CustomLoss()
