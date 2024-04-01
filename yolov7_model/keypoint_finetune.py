@@ -17,12 +17,11 @@ from models.yolo import MyIKeypoint
 from my_utils import *
 
 class CustomDataset(Dataset):
-    def __init__(self, data, targets, image_folder, scales, device="cpu"):
-        self.data = data
-        self.targets = targets
-        self.device = device
+    def __init__(self, annotation_path, image_folder, scales, device="cpu"):
+        self.data, self.targets = read_csv_file(annotation_path)
         self.image_folder = image_folder
         self.scales = scales
+        self.device = device
 
     def __len__(self):
         return len(self.data)
@@ -39,7 +38,7 @@ class CustomDataset(Dataset):
             targets.append(self.get_target(idx, x, y))
 
         return image, targets
-    
+
     def get_target(self, idx: int, x_num_cells: int, y_num_cells: int):
         """
         Gets targets far a dataset with a specific index and specific scale.
@@ -122,11 +121,6 @@ class CustomLoss(nn.Module):
         # Define the number of keypoints
         num_keypoints = 4
 
-        #print("---------- pred ------------")
-        #print(pred.view(-1)[:50])
-        #print("---------- target ------------")
-        #print(target.view(-1)[:50])
-
         # Split predictions and targets into separate tensors for each keypoint
         pred = pred.split(3, dim=-1)  # Split along the last dimension
         target = target.split(3, dim=-1)
@@ -137,7 +131,7 @@ class CustomLoss(nn.Module):
         # Compute loss for each keypoint
         for i in range(num_keypoints):
             pred_x, pred_y,  pred_conf = pred[i][:, :, :, 0], pred[i][:, :, :, 1], pred[i][:, :, :, 2]
-            target_x, target_y,  target_conf = target[i][:, :, :, 0], target[i][:, :, :, 1], target[i][:, :, :, 2]
+            target_x, target_y, target_conf = target[i][:, :, :, 0], target[i][:, :, :, 1], target[i][:, :, :, 2]
 
             # Compute the mask for reliable predictions based on ground truth confidence scores
             mask = (target_conf == 1).squeeze(-1)
@@ -147,7 +141,7 @@ class CustomLoss(nn.Module):
                 loss_x = F.mse_loss(pred_x[mask], target_x[mask])
                 loss_y = F.mse_loss(pred_y[mask], target_y[mask])
             else:
-                loss_x = loss_y = torch.tensor(0.0, device=pred[i].device)
+                loss_x = loss_y = torch.tensor(0.0, device=pred[i].device, requires_grad=True)
 
             # Compute the confidence loss for the current keypoint
             #loss_conf = F.binary_cross_entropy(pred_conf.view(-1), target_conf.view(-1))
@@ -156,11 +150,9 @@ class CustomLoss(nn.Module):
 
             # Accumulate the losses
             keypoint_loss = loss_x + loss_y + loss_conf
-            #print("loss x:", loss_x)
-            #print("loss y:", loss_y)
-            #print("loss conf:", loss_conf)
             scale_loss += keypoint_loss
             
+        #return scale_loss
         return scale_loss
 
 
@@ -186,30 +178,34 @@ def read_csv_file(file_path):
 
     return image_names, targets
 
-def run_epoch(model, dataloader, optimiser, criterion):
-    model.train()
+def run_epoch(model, dataloader, criterion, optimiser=None, update_weights=True):
+    model.train() if update_weights else model.eval()
     epoch_loss = 0.0
 
     for batch_idx, (images, targets) in enumerate(dataloader):
-        # Zero the gradients
-        optimiser.zero_grad()
+        if update_weights:
+            optimiser.zero_grad()
 
         # Forward pass
         outputs = model(images)
 
+        if not update_weights:
+            outputs = outputs[1]
+
         # Compute loss
         loss = criterion(outputs, targets)
 
-        # Backward pass
-        loss.backward()
+        if update_weights:
+            # Backward pass
+            loss.backward()
 
-        # Print gradients for each parameter
-        # for name, param in model.named_parameters():
-        #     if param.grad is not None:
-        #         print(f'Parameter: {name}, Mean Gradient: {param.grad.mean()}, Max Gradient: {param.grad.abs().max()}')
+            # Print gradients for each parameter
+            # for name, param in model.named_parameters():
+            #     if param.grad is not None:
+            #         print(f'Parameter: {name}, Mean Gradient: {param.grad.mean()}, Max Gradient: {param.grad.abs().max()}, Min Gradient: {param.grad.min()}')
 
-        # Update weights
-        optimiser.step()
+            # Update weights
+            optimiser.step()
 
         # Accumulate loss
         epoch_loss += loss.item()
@@ -220,21 +216,23 @@ def run_epoch(model, dataloader, optimiser, criterion):
     return epoch_loss
 
 def main():
-    num_epochs = 15
+    num_epochs = 100
+
+    #torch.manual_seed(1)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
-    
-    image_names, targets = read_csv_file("../images/labels/annotations_multi.csv")
 
     # Create dataset
     batch_size = 6
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
-    dataset = CustomDataset(image_names, targets, labeled_image_folder, scales, device)
-    subset_dataset = dataset[:6]
-    dataloader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=False)
+    dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
+    train_set, val_set = torch.utils.data.random_split(dataset, [1200, 270])
+    #train_set, val_set, temp = torch.utils.data.random_split(dataset, [240, 24, 1206])
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_set, batch_size=batch_size)
 
     #Initialise loss
     criterion = CustomLoss()
@@ -255,12 +253,15 @@ def main():
     if torch.cuda.is_available():
         model.half().to(device)
 
-    optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001)
+    #optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0.01)
+    optimiser = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, momentum=0.9, weight_decay=0.1)
 
     for epoch in range(num_epochs):
-        epoch_loss = run_epoch(model, dataloader, optimiser, criterion)
-        print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}')
-        
+        epoch_loss = run_epoch(model, train_loader, criterion, optimiser)
+        val_loss = run_epoch(model, val_loader, criterion, update_weights=False)
+        print(f'Epoch [{epoch+1}/{num_epochs}], Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}')
+
+    torch.save(model.state_dict(), 'first_model_100_epochs.pt')
 
 if __name__ == "__main__":
     main()
