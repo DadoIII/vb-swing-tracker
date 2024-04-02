@@ -5,6 +5,7 @@
 *.avi
 *.MOV
 *.mp4
+training_progress*.txt
 /images
 labeled_image_names.txt
 /yolov5/runs

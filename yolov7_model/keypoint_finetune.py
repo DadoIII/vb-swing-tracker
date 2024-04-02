@@ -6,6 +6,7 @@ import csv
 import numpy as np
 from torchvision import transforms
 from typing import List
+import time
 
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
@@ -216,9 +217,13 @@ def run_epoch(model, dataloader, criterion, optimiser=None, update_weights=True)
     return epoch_loss
 
 def main():
-    num_epochs = 100
-
     #torch.manual_seed(1)
+
+    num_epochs = 100
+    lr = 1e-4
+    momentum = 0.95
+    weight_decay = 0.15
+    model_name = f'{num_epochs}_epochs_{lr}_lr_{momentum}_m_{weight_decay}_wd'
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
@@ -254,14 +259,22 @@ def main():
         model.half().to(device)
 
     #optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0.01)
-    optimiser = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, momentum=0.9, weight_decay=0.1)
+    optimiser = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=momentum, weight_decay=weight_decay)
 
-    for epoch in range(num_epochs):
-        epoch_loss = run_epoch(model, train_loader, criterion, optimiser)
-        val_loss = run_epoch(model, val_loader, criterion, update_weights=False)
-        print(f'Epoch [{epoch+1}/{num_epochs}], Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}')
+    with open('training_progress_' + model_name + '.txt', 'w') as file:
+        file.write("Epoch,Training Loss,Validation Loss\n")
 
-    torch.save(model.state_dict(), 'first_model_100_epochs.pt')
+        for epoch in range(num_epochs):
+            start_time = time.time()
+            epoch_loss = run_epoch(model, train_loader, criterion, optimiser)
+            val_loss = run_epoch(model, val_loader, criterion, update_weights=False)
+            end_time = time.time()
+            print(f'Epoch [{epoch+1}/{num_epochs}], Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}, Time: {end_time-start_time}s')
+
+            # Write epoch results to file
+            file.write(f"{epoch+1},{epoch_loss},{val_loss}\n")
+
+    torch.save(model.state_dict(), model_name + '.pt')
 
 if __name__ == "__main__":
     main()
