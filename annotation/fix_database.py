@@ -42,8 +42,9 @@ def main():
     image_count = 0
     last_image_name = None
     folder_path = Path(old_images)
-    file_paths = sorted(folder_path.iterdir(), key=lambda x: extract_index(x.name))
+    file_paths = sorted(folder_path.iterdir(), key=lambda x: extract_index(x.name))  # Sort images by index
 
+    # For each labeled image
     for file_path in file_paths:
         if file_path.is_file():
             image_index = int(file_path.name[5:-4])
