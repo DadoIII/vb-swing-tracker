@@ -179,6 +179,10 @@ def save_labels():
 
     # Perform the crops and save the image and labels
     center_image = get_center_crop()
+    if center_image == "User cancel":
+        print("Successfully canceled the crop, adjust the position of the image and continue.")
+        return
+
     labeled_images = image_utils.ten_crop(center_image, positions)
     for labeled_image in labeled_images:
         add_labeled_image(labeled_image)

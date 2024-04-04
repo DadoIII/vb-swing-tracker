@@ -106,18 +106,32 @@ def crop_image(image: np.ndarray, start_x , start_y, width, height) -> np.ndarra
 
     Returns:
         np.ndarray: The cropped region of the input image.
+        OR
+        str: String saying that the user canceled the cropping process.
 
     Raises:
-        Exception: If the crop region is out of bounds for the input image.
+        Exception: If the padding of the image is not performed correctly.
     """
 
     # Make sure the crop is in bounds
-    if start_x < 0 or start_y < 0:
-        raise Exception(f"Crop is out of bounds for the image. Cannot start at pixel: ({start_x}, {start_y}).")
-    if start_x + width > image.shape[1]:
-        raise Exception(f"Crop is out of bounds for the image. Cannot take pixel: ({start_x+width},y) from an image with width: {image.shape[1]}.")
-    if start_y + height > image.shape[0]:
-        raise Exception(f"Crop is out of bounds for the image. Cannot take pixel: (x,{start_y+height}) from an image with height: {image.shape[0]}.")
+    oob = False
+    if start_x < 0 or start_x + width > image.shape[1]:
+        print(f"The width of the crop is out of bounds for the image.")
+        oob = True
+    if start_y < 0 or start_y + height > image.shape[0]:
+        print(f"The height of the crop is out of bounds for the image.")
+        oob = True
+
+    if oob: # Ask to pad if the crop is out of bounds
+        user_input = input("Do you want to pad the image and continue? (Y/N):")
+        if user_input.lower() == 'y' or user_input.lower() == 'yes':
+            padded_image = pad_image(image[max(0, start_x):min(start_x + width, image.shape[1]), max(0, start_y):min(start_y + height, image.shape[0])])
+            if padded_image.shape[:2] == (height, width):
+                return padded_image
+            else:
+                raise Exception(f'Padded image had a size of {padded_image.shape[:2]} instead of {(height, width)}. Most likely a bug in the code.')
+        else:
+            return "User cancel"
     
     return image[start_y:start_y+height, start_x:start_x+width]
 
@@ -188,3 +202,27 @@ def normalise_multiple_labels(positions: Dict[str, List[Tuple[int, int]]], image
         return_list.append(' '.join(coords))
 
     return return_list
+
+def pad_image(image, size=1060, colour=(114,114,114)):
+    """
+    Pads image to a square of a speficied size if the height and or with are less than the size.
+
+    Parameters:
+        image (np.ndarray): Image to pad.
+        size (int): The size of the padded image.
+        colour (int, int, int): RGB of the padding.
+
+    Returns:
+        np.ndarray: The padded image.
+    """
+    height, width = image.shape[:2]  # current shape [height, width]
+
+    dh = (max(0, size - height)) / 2
+    dw = (max(0, size - width)) / 2
+
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+
+    image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=colour)
+
+    return image

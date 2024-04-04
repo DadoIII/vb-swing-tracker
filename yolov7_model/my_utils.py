@@ -13,7 +13,7 @@ def distance_based_weights(distances, num_of_scales):
 
     Parameters:
         distances (torch.Tensor): Tensor of disatnces between labels for each sample of shape (batch_size, 1)
-        num_of_scales (int): The number of scales the yolo model is detecting object at. (Usually 3)
+        num_of_scales (int): The number of scales the yolo model is detecting object at. (Usually 4)
 
     Returns:
         torch.Tensor: A tensor of weights for each sample of shape (batch_size, num_of_scales)
@@ -50,7 +50,7 @@ def weighted_loss(outputs, targets, distances):
         total_loss += weighted_scale_loss
     return total_loss
 
-def elbow_wrist_nms(prediction, conf_thres=0.5, overlap_distance = 0.05):
+def elbow_wrist_nms(prediction, conf_thres=0.5, overlap_distance=0.05):
     """Runs Non-Maximum Suppression (NMS) for elbows and wrists.
 
     Parameters:

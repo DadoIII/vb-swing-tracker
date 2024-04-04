@@ -193,6 +193,8 @@ def run_epoch(model, dataloader, criterion, optimiser=None, update_weights=True)
         if not update_weights:
             outputs = outputs[1]
 
+        print(outputs[0][0,0,0,:])
+
         # Compute loss
         loss = criterion(outputs, targets)
 
@@ -219,10 +221,10 @@ def run_epoch(model, dataloader, criterion, optimiser=None, update_weights=True)
 def main():
     #torch.manual_seed(1)
 
-    num_epochs = 100
+    num_epochs = 1
     lr = 1e-4
-    momentum = 0.95
-    weight_decay = 0.15
+    momentum = 0.9
+    weight_decay = 0.1
     model_name = f'{num_epochs}_epochs_{lr}_lr_{momentum}_m_{weight_decay}_wd'
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -234,8 +236,9 @@ def main():
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
-    train_set, val_set = torch.utils.data.random_split(dataset, [1200, 270])
+    #train_set, val_set = torch.utils.data.random_split(dataset, [1200, 270])
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [240, 24, 1206])
+    train_set, val_set, temp = torch.utils.data.random_split(dataset, [1, 1, 1468])
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size)
 
@@ -274,7 +277,7 @@ def main():
             # Write epoch results to file
             file.write(f"{epoch+1},{epoch_loss},{val_loss}\n")
 
-    torch.save(model.state_dict(), model_name + '.pt')
+    #torch.save(model, model_name + '.pt')
 
 if __name__ == "__main__":
     main()

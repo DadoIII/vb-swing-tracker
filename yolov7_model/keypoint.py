@@ -193,26 +193,28 @@ def test_model_output(model, image, device):
 
     with torch.no_grad():
         #outputs = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
-        elbows, wrists = elbow_wrist_nms(out2, 0.501, overlap_distance=0.05)
+        elbows, wrists = elbow_wrist_nms(out2, 0.3, overlap_distance=0.02)
 
     plot_keypoints(original_image, elbows, wrists)
 
-    cv2.imwrite('output_test.jpg', original_image)
+    cv2.imwrite('output_test.png', original_image)
 
 
 
 def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
-    model = weigths['model']
+    #weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
+    #model = weigths['model']
+
+    model = torch.load('50_epochs_0.0001_lr_0.9_m_0.1_wd.pt', map_location=device)
     
-    torch.manual_seed(1)
+    #torch.manual_seed(1)
 
     #print(model)
-    layer = MyIKeypoint(ch=(256, 512, 768, 1024))
-    layer.f = [114, 115, 116, 117]
-    layer.i = 118
-    model.model[-1] = layer
+    #layer = MyIKeypoint(ch=(256, 512, 768, 1024))
+    #layer.f = [114, 115, 116, 117]
+    #layer.i = 118
+    #model.model[-1] = layer
     
     # print("LAST LAYER ==============================")
     # print(model)
@@ -225,7 +227,7 @@ def main():
     #output_path = './test_images/video1_with_keypoints.avi'
     batch_size = 1
 
-    input_path = './test_images/test1.jpg'
+    input_path = './test_images/image430.png'
     output_path = './test_images/image_with_keypoints.png'
 
     test_model_output(model, input_path, device)
