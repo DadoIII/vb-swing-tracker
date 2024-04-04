@@ -1,5 +1,6 @@
 # This code helps when some of the images were manually removed from the database.
 # It will rename the remaining pictures to leave no gaps in the numbering of the names and adjust the labels accordingly.
+# Might not work properly if you delete only some of the crops from one image, to make this work delete ALL of the 10 crops
 
 from pathlib import Path
 import os
