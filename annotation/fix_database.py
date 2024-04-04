@@ -62,6 +62,7 @@ def main():
             # Open the CSV file in write mode
             with open(image_labels_file, 'a', newline='') as csvfile:
                 csvwriter = csv.writer(csvfile)
+                image_labels[image_index][0] = f"image{image_count}.png"
                 csvwriter.writerow(image_labels[image_index])
 
             image_count += 1
