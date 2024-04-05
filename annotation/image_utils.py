@@ -112,8 +112,7 @@ def crop_image(image: np.ndarray, start_x , start_y, width, height) -> np.ndarra
     Raises:
         Exception: If the padding of the image is not performed correctly.
     """
-
-    # Make sure the crop is in bounds
+    # Check if the crop is in bounds
     oob = False
     if start_x < 0 or start_x + width > image.shape[1]:
         print(f"The width of the crop is out of bounds for the image.")
@@ -123,9 +122,9 @@ def crop_image(image: np.ndarray, start_x , start_y, width, height) -> np.ndarra
         oob = True
 
     if oob: # Ask to pad if the crop is out of bounds
-        user_input = input("Do you want to pad the image and continue? (Y/N):")
+        user_input = input("Do you want to pad the image and continue? (Y/N): ")
         if user_input.lower() == 'y' or user_input.lower() == 'yes':
-            padded_image = pad_image(image[max(0, start_x):min(start_x + width, image.shape[1]), max(0, start_y):min(start_y + height, image.shape[0])])
+            padded_image = pad_image(image[max(0, start_y):min(start_y + height, image.shape[0]), max(0, start_x):min(start_x + width, image.shape[1])])
             if padded_image.shape[:2] == (height, width):
                 return padded_image
             else:

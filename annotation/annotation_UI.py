@@ -179,7 +179,7 @@ def save_labels():
 
     # Perform the crops and save the image and labels
     center_image = get_center_crop()
-    if center_image == "User cancel":
+    if type(center_image) == str and center_image == "User cancel":
         print("Successfully canceled the crop, adjust the position of the image and continue.")
         return
 
@@ -221,10 +221,9 @@ def reset():
     global positions, label_stack
     label_stack = []
     positions = {'elbow_right': [],
-             'elbow_left': [],
-             'wrist_right': [],
-             'wrist_left': [],
-             }
+                 'elbow_left': [],
+                 'wrist_right': [],
+                 'wrist_left': [],}
     c.delete('elbow_right', 'wrist_right', 'elbow_left', 'wrist_left')
     print("All keypoints reset!")
 
