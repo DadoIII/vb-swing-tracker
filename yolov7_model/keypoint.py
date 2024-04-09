@@ -10,6 +10,7 @@ from utils.datasets import letterbox
 from utils.general import non_max_suppression_kpt
 from utils.plots import output_to_keypoint, plot_skeleton_kpts
 from models.yolo import MyIKeypoint
+from keypoint_finetune import CustomDataset, CustomLoss
 
 from my_utils import *
 
@@ -167,16 +168,16 @@ def video_inference(model, video_path, output_path, batch_size=1, device="cpu", 
     cv2.destroyAllWindows()
 
 
-def test_model_output(model, image, device):
-    original_image = cv2.imread(image)
+def test_model_output(model, image, original_image, device):
+    # original_image = cv2.imread(image)
 
-    image = cv2.imread(image)
-    image, ratio, padding = letterbox(image, 960, stride=64, auto=True)
-    print(ratio, padding)
-    image = transforms.ToTensor()(image)
-    image = torch.tensor(np.array([image.numpy()]))
-    image = image.to(device)
-    image = image.half()
+    # image = cv2.imread(image)
+    # image, ratio, padding = letterbox(image, 960, stride=64, auto=True)
+    # print(ratio, padding)
+    # image = transforms.ToTensor()(image)
+    # image = torch.tensor(np.array([image.numpy()]))
+    # image = image.to(device)
+    # image = image.half()
 
     output, out2 = model(image)
 
@@ -193,44 +194,54 @@ def test_model_output(model, image, device):
 
     with torch.no_grad():
         #outputs = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
-        elbows, wrists = elbow_wrist_nms(out2, 0.3, overlap_distance=0.02)
+        keypoints = elbow_wrist_nms(out2, 0.4, overlap_distance=0.05)
 
-    plot_keypoints(original_image, elbows, wrists)
+    plot_keypoints(original_image, keypoints[0])
 
     cv2.imwrite('output_test.png', original_image)
+
+    return out2
 
 
 
 def main():
+    #torch.manual_seed(1)
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     #weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     #model = weigths['model']
 
-    model = torch.load('50_epochs_0.0001_lr_0.9_m_0.1_wd.pt', map_location=device)
+    model = torch.load('150_epochs_0.0001_lr_0.92_m_0.15_wd.pt', map_location=device)
     
-    #torch.manual_seed(1)
 
-    #print(model)
-    #layer = MyIKeypoint(ch=(256, 512, 768, 1024))
-    #layer.f = [114, 115, 116, 117]
-    #layer.i = 118
-    #model.model[-1] = layer
-    
-    # print("LAST LAYER ==============================")
-    # print(model)
+    labeled_image_folder = "../images/labeled_images/"
+    scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
+    dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
+
+    criterion = CustomLoss(960, 960)
 
     _ = model.float().eval()
     if torch.cuda.is_available():
         model.half().to(device)
 
-    #input_path = './test_images/video1.MOV'
-    #output_path = './test_images/video1_with_keypoints.avi'
-    batch_size = 1
-
     input_path = './test_images/image430.png'
     output_path = './test_images/image_with_keypoints.png'
 
-    test_model_output(model, input_path, device)
+    im_index = 430 # 400
+    original_image = cv2.imread(f'../images/labeled_images/image{im_index}.png')
+    input, targets = dataset.__getitem__(im_index)
+    input = input.view(1, 3, 960, 960)
+    batched_targets = []
+    for target in targets:
+        batched_targets.append(target.unsqueeze(0))
+
+    output = test_model_output(model, input, original_image, device)
+
+    loss = criterion(output, batched_targets)
+
+    print(f"Loss: {loss}")
+
+    #test_model_output(model, input_path, device)
     #video_inference(model, input_path, output_path, batch_size, device=device, left_handed=False, tracking=True)
 
 

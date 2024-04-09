@@ -50,57 +50,82 @@ def weighted_loss(outputs, targets, distances):
         total_loss += weighted_scale_loss
     return total_loss
 
-def elbow_wrist_nms(prediction, conf_thres=0.5, overlap_distance=0.05):
-    """Runs Non-Maximum Suppression (NMS) for elbows and wrists.
+def elbow_wrist_nms(predictions, conf_thres=0.5, overlap_distance=0.05):
+    """
+    Compiles a list of detected keypoints above a certain confidence threshold and removes ones of the same type that are too close.
 
     Parameters:
-        predictions (List(torch.Tensor)): A list of tensors of shape (bs, x_grids, y_grids, 6)
+        predictions (List(torch.Tensor)): A list of tensors of shape (bs, x_grids, y_grids, 12)
         conf_thres (float): A threshold for confidence of a singular elbow or wrist prediction
         overlap_distance (float): Distance, which is considered as overlapping keypoints. It should be a ratio betwenn 0 and 1.
 
     Returns:
-         elbows: List of tuples containing elbow detections (x, y, conf), where x and y are represent a ratio of the width/height
-         wrists: List of tuples containing wrist detections (x, y, conf), where x and y are represent a ratio of the width/height
+            keypoints: A 3d list containing tuples (x, y, conf) keypoint detections, where x and y are represent a ratio of the width/height.
+                The three dimensions are for the different images in the batch, the different keypoint types and each individual keypoint within each type.
     """
 
-    elbows = []
-    wrists = []
+    bs = predictions[0].shape[0]
+    keypoints = [[[],[],[],[]] for _ in range(bs)]
 
-    for scale in prediction:
+    # for scale in prediction:
+    #     x_size = 1 / scale.shape[1]
+    #     y_size = 1 / scale.shape[2]
+    #     elbow_mask = scale[:, :, :, 2] > conf_thres
+    #     wrist_mask = scale[:, :, :, -1] > conf_thres
+    #     elbow_indices = torch.nonzero(elbow_mask)
+    #     wrist_indices = torch.nonzero(wrist_mask)
+    #     for idx in elbow_indices:
+    #         bs, x, y = idx.tolist()
+    #         x_pos = float(x * x_size + x_size * scale[bs, x, y, 0])
+    #         y_pos = float(y * y_size + y_size * scale[bs, x, y, 1])
+    #         conf = float(scale[bs, x, y, 2])
+    #         overlapping = False
+    #         for x, y, _ in elbows:
+    #             if get_keypoint_distance((x,y), (x_pos, y_pos)) < overlap_distance:
+    #                 overlapping = True
+    #         if not overlapping:
+    #             elbows.append((x_pos, y_pos, conf))
+
+    #     for idx in wrist_indices:
+    #         bs, x, y = idx.tolist()
+    #         x_pos = float(x * x_size + x_size * scale[bs, x, y, 3])
+    #         y_pos = float(y * y_size + y_size * scale[bs, x, y, 4])
+    #         conf = float(scale[bs, x, y, 5])
+    #         overlapping = False
+    #         for x, y, _ in wrists:
+    #             if get_keypoint_distance((x,y), (x_pos, y_pos)) < overlap_distance:
+    #                 overlapping = True
+    #         if not overlapping:
+    #             wrists.append((x_pos, y_pos, conf))
+
+    for scale in predictions:
         x_size = 1 / scale.shape[1]
         y_size = 1 / scale.shape[2]
-        elbow_mask = scale[:, :, :, 2] > conf_thres
-        wrist_mask = scale[:, :, :, -1] > conf_thres
-        elbow_indices = torch.nonzero(elbow_mask)
-        wrist_indices = torch.nonzero(wrist_mask)
-        for idx in elbow_indices:
-            bs, x, y = idx.tolist()
-            x_pos = float(x * x_size + x_size * scale[bs, x, y, 0])
-            y_pos = float(y * y_size + y_size * scale[bs, x, y, 1])
-            conf = float(scale[bs, x, y, 2])
-            overlapping = False
-            for x, y, _ in elbows:
-                if get_keypoint_distance((x,y), (x_pos, y_pos)) < overlap_distance:
-                    overlapping = True
-            if not overlapping:
-                elbows.append((x_pos, y_pos, conf))
 
-        for idx in wrist_indices:
-            bs, x, y = idx.tolist()
-            x_pos = float(x * x_size + x_size * scale[bs, x, y, 3])
-            y_pos = float(y * y_size + y_size * scale[bs, x, y, 4])
-            conf = float(scale[bs, x, y, 5])
-            overlapping = False
-            for x, y, _ in wrists:
-                if get_keypoint_distance((x,y), (x_pos, y_pos)) < overlap_distance:
-                    overlapping = True
-            if not overlapping:
-                wrists.append((x_pos, y_pos, conf))
+        for batch in range(bs):
+            for keypoint_index in range(0, 11, 3):
+                mask = scale[batch, :, :, keypoint_index+2] > conf_thres
+                indices = torch.nonzero(mask)
 
-    return elbows, wrists
+                for idx in indices:
+                    x, y = idx.tolist()
+                    x_pos = float(x * x_size + x_size * scale[batch, x, y, keypoint_index])
+                    y_pos = float(y * y_size + y_size * scale[batch, x, y, keypoint_index+1])
+                    conf = float(scale[batch, x, y, keypoint_index+2])
+                    overlapping = False
+                    
+                    for existing_keypoint in keypoints[batch][keypoint_index // 3]:
+                        if get_keypoint_distance(existing_keypoint[:2], (x_pos, y_pos)) < overlap_distance:
+                            overlapping = True
+                            break
+                    
+                    if not overlapping:
+                        keypoints[batch][keypoint_index // 3].append((x_pos, y_pos, conf))
+
+    return keypoints
     
 def get_keypoint_distance(kpt1, kpt2):
-    # Calucate the euclidian distance between two keypoints (x1, y1), (x2, y2)
+    """Calucate the euclidian distance between two keypoints (x1, y1), (x2, y2)"""
     return math.sqrt((kpt1[0] - kpt2[0]) ** 2 + (kpt1[1] - kpt2[1]) ** 2)
 
 def get_elbow_from_skeleton(kpts, left_handed=False, check_confidence=False, confidence_threshold=0.5, ):
@@ -161,23 +186,22 @@ def get_wrist_from_skeleton(kpts, left_handed=False, check_confidence=False, con
         return None
 
 
-def plot_keypoints(im, elbows, wrists):
+def plot_keypoints(im, keypoints):
     """
     Plots circles indicating elbows and wrists on an image.
 
     Paremeters:
         im (np.ndarray): Image to plot the keypoints on.
-        elbows (list[(float)]): A list of tuples containing the x, y, conf of elbow keypoints
-        wrists (list[(float)]): A list of tuples containing the x, y, conf of wrist keypoints
+        keypoints (list[list[(float)]]): A list containing lists of tuples containing the x, y, conf of differnet keypoints
     """
     height, width = im.shape[:2]
-    colour = (0, 0, 255)
-    for x, y, _ in elbows:
-        cv2.circle(im, (int(x * width), int(y * height)), 5, colour, -1)
+    colours = [(0, 0, 255), (0, 255, 0), (180, 105, 255), (255, 0 , 0)]
 
-    colour = (255, 0, 0)
-    for x, y, _ in wrists:
-        cv2.circle(im, (int(x * width), int(y * height)), 5, colour, -1)
+    for i in range(len(keypoints)):
+
+        for x, y, _ in keypoints[i]:
+            cv2.circle(im, (int(x * width), int(y * height)), 5, colours[i], -1)
+
 
 def plot_elbow_wrist(im, kpts, left_handed=False):
     """
