@@ -261,7 +261,7 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create dataset
-    batch_size = 12
+    batch_size = 6
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
@@ -303,9 +303,10 @@ def main():
     for param in model.parameters():
         param.requires_grad = False
 
-    # Make parameters of the last layers trainable
-    for param in model.model[-1].m_kpt[-1].parameters():
-        param.requires_grad = True
+   # Make parameters of the last layers trainable
+    for head in model.model[-1].m_kpt:
+        for param in head.parameters():
+            param.requires_grad = True
 
     if torch.cuda.is_available():
         model.half().to(device)
