@@ -96,6 +96,7 @@ class CustomLoss(nn.Module):
             loss (tensor): Scalar tensor representing the computed loss.
         """
         total_loss = 0.0
+        scale_losses = {}
 
         # Loop through predictions and targets at each scale
         for pred, target in zip(predictions, targets):
@@ -103,11 +104,13 @@ class CustomLoss(nn.Module):
             scale_loss = self.compute_scale_loss(pred, target)
             # Accumulate the losses across all scales
             total_loss += scale_loss
+            x, y = pred.shape[1:3]
+            scale_losses[f"{x},{y}"] = float(scale_loss)
         
         # Average the losses across scales
         average_loss = total_loss / len(predictions)
         
-        return average_loss
+        return average_loss, scale_losses
 
     def compute_scale_loss(self, pred, target):
         """
@@ -161,7 +164,8 @@ class CustomLoss(nn.Module):
             loss_conf = self.BCE(pred_conf, target_conf)
 
             # Accumulate the losses
-            keypoint_loss = loss_x + loss_y + (loss_conf * 10)
+            #keypoint_loss = loss_x + loss_y + (loss_conf * 10)
+            keypoint_loss = loss_conf * 10
             scale_loss += keypoint_loss
             
         #return scale_loss
@@ -194,6 +198,11 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
     model.train() if update_weights else model.eval()
     epoch_loss = 0.0
 
+    scale_losses_total = {'15,15': 0,
+                          '30,30': 0,
+                          '60,60': 0,
+                          '120,120': 0}
+
     for batch_idx, (images, targets) in enumerate(dataloader):
         if update_weights:
             optimiser.zero_grad()
@@ -207,7 +216,7 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
         #(outputs[0][0,0,0,:])
 
         # Compute loss
-        loss = criterion(outputs, targets)
+        loss, scale_losses = criterion(outputs, targets)
 
         if update_weights:
             # Backward pass
@@ -216,7 +225,7 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
             with open("gradient_log.txt", "a") as gradient_log:
                 # Print gradients for each parameter
                 for name, param in model.named_parameters():
-                    if param.grad is not None:
+                    if param.grad is not None and name.startswith('model.118.m_kpt.3.11'):
                         gradient_log.write(f'Parameter: {name}, Mean Gradient: {param.grad.mean()}, Max Gradient: {param.grad.max()}, Min Gradient: {param.grad.min()}\n')
 
             # Update weights
@@ -227,27 +236,32 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
 
         # Accumulate loss
         epoch_loss += loss.item()
+        for key, value in scale_losses.items():
+            scale_losses_total[key] += value
 
     # Calculate average epoch loss
     epoch_loss /= len(dataloader)
 
-    return epoch_loss
+    for key in scale_losses_total:
+        scale_losses_total[key] /= len(dataloader)
+
+    return epoch_loss, scale_losses_total
 
 def main():
     #torch.manual_seed(1)
 
     image_width = image_height = 960
-    num_epochs = 125
-    lr = 1e-4
-    momentum = 0.85
-    weight_decay = 0.2
-    lr_decay = True  # Learning rate decay
+    num_epochs = 100
+    lr = 5e-5
+    momentum = 0.9
+    weight_decay = 0.15
+    lr_decay = False  # Learning rate decay
     model_name = f'{num_epochs}_epochs_{lr}_lr_{momentum}_m_{weight_decay}_wd_lr_decay={lr_decay}'
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create dataset
-    batch_size = 6
+    batch_size = 12
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
@@ -263,10 +277,26 @@ def main():
     # Define model
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
+
     # Adjust model
     layer = MyIKeypoint(ch=(256, 512, 768, 1024))
     layer.f = [114, 115, 116, 117]
     layer.i = 118
+
+    new_m_kpt = nn.ModuleList()
+    for i, module_list in enumerate(layer.m_kpt):
+        new_module_list = nn.Sequential()
+        for j, module in enumerate(module_list):
+            # Skip the last layer for each head
+            if j < len(module_list) - 1:
+                # Copy parameters from the original model to the new module
+                state_dict = model.model[-1].m_kpt[i][j].state_dict()
+                module.load_state_dict(state_dict)
+            new_module_list.add_module(str(j), module)
+        new_m_kpt.append(new_module_list)
+
+    # Assign the new m_kpt sequence to the new layer
+    layer.m_kpt = new_m_kpt
     model.model[-1] = layer
 
     # Freeze all parameters
@@ -274,7 +304,7 @@ def main():
         param.requires_grad = False
 
     # Make parameters of the last layers trainable
-    for param in model.model[-1].parameters():
+    for param in model.model[-1].m_kpt[-1].parameters():
         param.requires_grad = True
 
     if torch.cuda.is_available():
@@ -285,7 +315,7 @@ def main():
 
     # Scheduler for learning rate decay
     if lr_decay:
-        scheduler = lr_scheduler.StepLR(optimiser, step_size=25, gamma=0.9)
+        scheduler = lr_scheduler.StepLR(optimiser, step_size=25, gamma=0.75)
     else:
         scheduler = None
 
@@ -298,10 +328,12 @@ def main():
 
         for epoch in range(num_epochs):
             start_time = time.time()
-            epoch_loss = run_epoch(model, train_loader, criterion, optimiser, scheduler)
-            val_loss = run_epoch(model, val_loader, criterion, update_weights=False)
+            epoch_loss, train_losses = run_epoch(model, train_loader, criterion, optimiser, scheduler)
+            val_loss, val_losses = run_epoch(model, val_loader, criterion, update_weights=False)
             end_time = time.time()
             print(f'Epoch [{epoch+1}/{num_epochs}], Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}, Time: {end_time-start_time}s')
+            print(f"Train losses: {train_losses}")
+            print(f"Val losses: {val_losses}")
 
             # Write epoch results to file
             file.write(f"{epoch+1},{epoch_loss},{val_loss}\n")
