@@ -169,40 +169,18 @@ def video_inference(model, video_path, output_path, batch_size=1, device="cpu", 
 
 
 def test_model_output(model, image, original_image, device):
-    # original_image = cv2.imread(image)
-
-    # image = cv2.imread(image)
-    # image, ratio, padding = letterbox(image, 960, stride=64, auto=True)
-    # print(ratio, padding)
-    # image = transforms.ToTensor()(image)
-    # image = torch.tensor(np.array([image.numpy()]))
-    # image = image.to(device)
-    # image = image.half()
-
-    output, out2 = model(image)
-
-    # with torch.no_grad():
-    #     output = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
-    #     output = torch.from_numpy(output_to_keypoint(output))
-
-    # # Rescale output to original image
-    # paddings = torch.tensor([padding[0], padding[1], 0])
-    # factors = torch.tensor([1 / ratio[0], 1 / ratio[1], 1])
-    # repeat_factors = factors.tile((output.shape[1] - 7) // 3)
-    # repeat_paddings = paddings.tile((output.shape[1] - 7) // 3)
-    # output = torch.cat([output[:, :7], (output[:, 7:] - repeat_paddings) * repeat_factors], dim=1)
+    out2 = model(image)
 
     with torch.no_grad():
         #outputs = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
-        keypoints = elbow_wrist_nms(out2, 0.4, overlap_distance=0.05)
+        keypoints = elbow_wrist_nms(out2, 0.2, overlap_distance=0.05)
+        pass
 
     plot_keypoints(original_image, keypoints[0])
 
     cv2.imwrite('output_test.png', original_image)
 
     return out2
-
-
 
 def main():
     #torch.manual_seed(1)
@@ -211,35 +189,43 @@ def main():
     #weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     #model = weigths['model']
 
-    model = torch.load('150_epochs_0.0001_lr_0.92_m_0.15_wd.pt', map_location=device)
+    model = torch.load('25_epochs_5e-05_lr_0.9_m_0.1_wd_lr_decay=False.pt', map_location=device)
     
-
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
 
     criterion = CustomLoss(960, 960)
 
-    _ = model.float().eval()
+    _ = model.float().train()
     if torch.cuda.is_available():
         model.half().to(device)
 
     input_path = './test_images/image430.png'
     output_path = './test_images/image_with_keypoints.png'
 
-    im_index = 430 # 400
-    original_image = cv2.imread(f'../images/labeled_images/image{im_index}.png')
-    input, targets = dataset.__getitem__(im_index)
-    input = input.view(1, 3, 960, 960)
-    batched_targets = []
-    for target in targets:
-        batched_targets.append(target.unsqueeze(0))
+    loss = 30
 
-    output = test_model_output(model, input, original_image, device)
+    i = 0
+    while i < 3129:
+        im_index = i # 430 # 400
+        original_image = cv2.imread(f'../images/labeled_images/image{im_index}.png')
+        input, targets = dataset.__getitem__(im_index)
+        input = input.view(1, 3, 960, 960)
+        batched_targets = []
+        for target in targets:
+            batched_targets.append(target.unsqueeze(0))
 
-    loss = criterion(output, batched_targets)
+        output = test_model_output(model, input, original_image, device)
 
-    print(f"Loss: {loss}")
+        #print(len(output))
+        #print(output[0].shape)
+        #print(output[1].shape)
+
+        loss = criterion(output, batched_targets)[0]
+
+        print(f"{i}, Loss: {loss}")
+        i += 1
 
     #test_model_output(model, input_path, device)
     #video_inference(model, input_path, output_path, batch_size, device=device, left_handed=False, tracking=True)

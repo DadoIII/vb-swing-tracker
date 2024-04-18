@@ -15,6 +15,7 @@ from utils.datasets import letterbox
 from utils.general import non_max_suppression_kpt
 from utils.plots import output_to_keypoint, plot_skeleton_kpts
 from models.yolo import MyIKeypoint
+from torchsummary import summary
 
 from my_utils import *
 
@@ -98,9 +99,8 @@ class CustomLoss(nn.Module):
         total_loss = 0.0
         scale_losses = {}
 
-        # Loop through predictions and targets at each scale
+        # Loop through predictions and targets at each scale and compute the loss at each scale
         for pred, target in zip(predictions, targets):
-            # Compute the loss for each scale (you can use any suitable loss function)
             scale_loss = self.compute_scale_loss(pred, target)
             # Accumulate the losses across all scales
             total_loss += scale_loss
@@ -195,7 +195,7 @@ def read_csv_file(file_path):
     return image_names, targets
 
 def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, update_weights=True):
-    model.train() if update_weights else model.eval()
+    model.train()
     epoch_loss = 0.0
 
     scale_losses_total = {'15,15': 0,
@@ -203,17 +203,12 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
                           '60,60': 0,
                           '120,120': 0}
 
-    for batch_idx, (images, targets) in enumerate(dataloader):
-        if update_weights:
-            optimiser.zero_grad()
+    if update_weights:
+        optimiser.zero_grad()
 
+    for batch_idx, (images, targets) in enumerate(dataloader):
         # Forward pass
         outputs = model(images)
-
-        if not update_weights:
-            outputs = outputs[1]
-
-        #(outputs[0][0,0,0,:])
 
         # Compute loss
         loss, scale_losses = criterion(outputs, targets)
@@ -228,16 +223,18 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
                     if param.grad is not None and name.startswith('model.118.m_kpt.3.11'):
                         gradient_log.write(f'Parameter: {name}, Mean Gradient: {param.grad.mean()}, Max Gradient: {param.grad.max()}, Min Gradient: {param.grad.min()}\n')
 
-            # Update weights
-            optimiser.step()
-
-            if scheduler != None:
-                scheduler.step()
-
         # Accumulate loss
         epoch_loss += loss.item()
         for key, value in scale_losses.items():
             scale_losses_total[key] += value
+
+    # Update weights
+    if update_weights:
+        optimiser.step()
+
+    if scheduler is not None:
+        scheduler.step()
+        #print(f"Learning Rate: {scheduler.get_lr()}")
 
     # Calculate average epoch loss
     epoch_loss /= len(dataloader)
@@ -251,10 +248,10 @@ def main():
     #torch.manual_seed(1)
 
     image_width = image_height = 960
-    num_epochs = 100
-    lr = 5e-5
+    num_epochs = 30
+    lr = 1e-4
     momentum = 0.9
-    weight_decay = 0.15
+    weight_decay = 0.1
     lr_decay = False  # Learning rate decay
     model_name = f'{num_epochs}_epochs_{lr}_lr_{momentum}_m_{weight_decay}_wd_lr_decay={lr_decay}'
 
@@ -265,8 +262,8 @@ def main():
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
-    train_set, val_set = torch.utils.data.random_split(dataset, [1200, 270])
-    #train_set, val_set, temp = torch.utils.data.random_split(dataset, [240, 24, 1206])
+    train_set, val_set, temp = torch.utils.data.random_split(dataset, [2626, 500, 4])
+    #train_set, val_set, temp = torch.utils.data.random_split(dataset, [500, 300, 2330])
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [1, 1, 1468])
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size)
@@ -296,7 +293,7 @@ def main():
         new_m_kpt.append(new_module_list)
 
     # Assign the new m_kpt sequence to the new layer
-    layer.m_kpt = new_m_kpt
+    #layer.m_kpt = new_m_kpt
     model.model[-1] = layer
 
     # Freeze all parameters
@@ -307,16 +304,24 @@ def main():
     for head in model.model[-1].m_kpt:
         for param in head.parameters():
             param.requires_grad = True
+        # for i, layer in enumerate(head):
+        #     if i >= len(head) - 1:  # Check if the layer index is one of the last layer
+        #         for param in layer.parameters():
+        #             param.requires_grad = True
 
     if torch.cuda.is_available():
         model.half().to(device)
 
-    #optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0.01)
-    optimiser = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=momentum, weight_decay=weight_decay)
+    #model.to(torch.float32)
+    #dummy_input = torch.randn(1, 3, 960, 960).half()
+    #summary(model, (1, 3, 960, 960), input=dummy_input)
+
+    #optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
+    optimiser = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=momentum, weight_decay=weight_decay, nesterov=True)
 
     # Scheduler for learning rate decay
     if lr_decay:
-        scheduler = lr_scheduler.StepLR(optimiser, step_size=25, gamma=0.75)
+        scheduler = lr_scheduler.StepLR(optimiser, step_size=10, gamma=0.5)
     else:
         scheduler = None
 
@@ -326,6 +331,14 @@ def main():
 
     with open('training_progress_' + model_name + '.txt', 'w') as file:
         file.write("Epoch,Training Loss,Validation Loss\n")
+        
+        # Print losses before the first epoch
+        epoch_loss, train_losses = run_epoch(model, train_loader, criterion, update_weights=False)
+        val_loss, val_losses = run_epoch(model, val_loader, criterion, update_weights=False)
+        print(f'Epoch [0/{num_epochs}], Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}')
+        print(f"Train losses: {train_losses}")
+        print(f"Val losses: {val_losses}")
+        file.write(f"0,{epoch_loss},{val_loss}\n")
 
         for epoch in range(num_epochs):
             start_time = time.time()
