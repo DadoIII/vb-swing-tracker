@@ -43,7 +43,7 @@ def compile_to_dict(image: np.ndarray, positions: Dict[str, List[Tuple[int, int]
     return dic
 
 
-def ten_crop(image: np.ndarray, positions: Dict[str, List[Tuple[int, int]]], crop_width: int = 960, crop_height: int = 960) -> List[Dict]:
+def ten_crop(image: np.ndarray, positions: Dict[str, List[Tuple[int, int]]], crop_size: int = 960, crop_amount: int = 100) -> List[Dict]:
     """
     Performs the ten crop algorithm. Takes crops from all the corners + the center crop. It also horizontally flips them.
 
@@ -58,31 +58,61 @@ def ten_crop(image: np.ndarray, positions: Dict[str, List[Tuple[int, int]]], cro
     """
 
     labeled_images = []
-
+    
+    c = crop_amount
     # (x, y) start of crops
     crop_starts = [
         (0, 0),  # Top-left 
-        (0, 100),  # Bottom-left
-        (100, 0),  # Top-right
-        (100, 100),  # Bottom-right
-        (50, 50)  # Center
+        (0, c),  # Bottom-left
+        (c, 0),  # Top-right
+        (c, c),  # Bottom-right
+        (c//2, c//2)  # Center
     ]
+
+    # Check if padding will be needed and if so, ask user if they want to proceed
+    padding = False
+    x_pad = y_pad = 0
+    image_height, image_width = image.shape[:2]
+    if image_height < crop_size + crop_amount or image_width < crop_size + crop_amount:
+        print(f"The height or width of the crop is out of bounds for the image.")
+        user_input = input("Do you want to pad the image and continue? (Y/N): ")
+        if user_input.lower() == 'y' or user_input.lower() == 'yes':
+            padding = True
+            x_pad = (crop_size + crop_amount - image_width) // 2
+            y_pad = (crop_size + crop_amount - image_height) // 2
+        else:
+            return "User cancel"
+
+    #print(f"Pad: {x_pad},  {y_pad}")
 
     # Do the 5 crops
     for (x_start, y_start) in crop_starts:
-        cropped_image = crop_image(image, x_start, y_start, crop_width, crop_height)
-        # Get the new keypoint positions after the flip
-        cropped_positions = {key: [(x - x_start, y - y_start) for (x, y) in value] for key, value in positions.items()}
+        # Crop the image
+        cropped_image = image[y_start:image_height-(crop_amount-y_start), x_start:image_width-(crop_amount-x_start)]
+        # Pad the image
+        if padding:
+            cropped_image = pad_image(cropped_image, 960)
+
+        # for x, y in positions["elbow_left"]:
+        #     print(x, y)
+        #     print([x - x_start > x_pad, x - x_start < x_pad + image_width, y - y_start > y_pad, y - y_start < y_pad + image_height])
+
+        # Get the new keypoint positions after the crop
+        cropped_positions = {key: [(x - x_start, y - y_start) for (x, y) in value  # Shift the keypoint based on the crop
+                                   if x - x_start > x_pad and x - x_start < x_pad + image_width - crop_amount # Make sure the keypoint is in bounds after crop
+                                   and y - y_start > y_pad and y - y_start < y_pad + image_height - crop_amount]
+                            for key, value in positions.items()}  # For each keypoint type
+
         dic = compile_to_dict(cropped_image, cropped_positions)
         labeled_images.append(dic)
 
         # Flip each image + elbow and wrist positions horizontally
         flipped_image = cv2.flip(cropped_image, 1)  # Flip image horizontally
         # Get the new elbow positions after the flip
-        left_elbows = [(crop_width - 1 - x, y) for (x, y) in cropped_positions["elbow_right"]]
-        left_wrists = [(crop_width - 1 - x, y) for (x, y) in cropped_positions["wrist_right"]]
-        right_elbows = [(crop_width - 1 - x, y) for (x, y) in cropped_positions["elbow_left"]]
-        right_wrists = [(crop_width - 1 - x, y) for (x, y) in cropped_positions["wrist_left"]]
+        left_elbows = [(crop_size - 1 - x, y) for (x, y) in cropped_positions["elbow_right"]]
+        left_wrists = [(crop_size - 1 - x, y) for (x, y) in cropped_positions["wrist_right"]]
+        right_elbows = [(crop_size - 1 - x, y) for (x, y) in cropped_positions["elbow_left"]]
+        right_wrists = [(crop_size - 1 - x, y) for (x, y) in cropped_positions["wrist_left"]]
         flipped_positions = {"elbow_right": right_elbows,
                              "wrist_right": right_wrists,
                              "elbow_left": left_elbows,
@@ -91,48 +121,6 @@ def ten_crop(image: np.ndarray, positions: Dict[str, List[Tuple[int, int]]], cro
         labeled_images.append(dic)
 
     return labeled_images
-
-
-def crop_image(image: np.ndarray, start_x , start_y, width, height) -> np.ndarray:
-    """
-    Crop a region from the input image.
-
-    Parameters:
-        image (np.ndarray): The input image to be cropped.
-        start_x (int): The x-coordinate of the top-left corner of the crop region.
-        start_y (int): The y-coordinate of the top-left corner of the crop region.
-        width (int): The width of the crop region.
-        height (int): The height of the crop region.
-
-    Returns:
-        np.ndarray: The cropped region of the input image.
-        OR
-        str: String saying that the user canceled the cropping process.
-
-    Raises:
-        Exception: If the padding of the image is not performed correctly.
-    """
-    # Check if the crop is in bounds
-    oob = False
-    if start_x < 0 or start_x + width > image.shape[1]:
-        print(f"The width of the crop is out of bounds for the image.")
-        oob = True
-    if start_y < 0 or start_y + height > image.shape[0]:
-        print(f"The height of the crop is out of bounds for the image.")
-        oob = True
-
-    if oob: # Ask to pad if the crop is out of bounds
-        user_input = input("Do you want to pad the image and continue? (Y/N): ")
-        if user_input.lower() == 'y' or user_input.lower() == 'yes':
-            padded_image = pad_image(image[max(0, start_y):min(start_y + height, image.shape[0]), max(0, start_x):min(start_x + width, image.shape[1])])
-            if padded_image.shape[:2] == (height, width):
-                return padded_image
-            else:
-                raise Exception(f'Padded image had a size of {padded_image.shape[:2]} instead of {(height, width)}. Most likely a bug in the code.')
-        else:
-            return "User cancel"
-    
-    return image[start_y:start_y+height, start_x:start_x+width]
 
 
 def normalise_single_labels(elbow_pos: List[Tuple[int, int]], wrist_pos: List[Tuple[int, int]], image_width: int = 960, image_height: int = 960) -> List[int]:
@@ -202,7 +190,7 @@ def normalise_multiple_labels(positions: Dict[str, List[Tuple[int, int]]], image
 
     return return_list
 
-def pad_image(image, size=1060, colour=(114,114,114)):
+def pad_image(image, size=960, colour=(114,114,114)):
     """
     Pads image to a square of a speficied size if the height and or with are less than the size.
 
@@ -222,6 +210,6 @@ def pad_image(image, size=1060, colour=(114,114,114)):
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
 
-    image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=colour)
+    padded_image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=colour)
 
-    return image
+    return padded_image

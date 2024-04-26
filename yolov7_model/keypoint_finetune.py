@@ -97,9 +97,17 @@ class CustomLoss(nn.Module):
             loss (tensor): Scalar tensor representing the computed loss.
         """
         total_loss = 0.0
-        scale_losses = {}
+        scale_outputs = {"losses": {}, "accs": {}, "FP": {}}
         total_acc = 0.0
         total_FP = 0
+
+
+        for scale in predictions:
+            x, y = scale.shape[1:3]
+            scale_outputs["losses"][f"{x},{y}"] = 0.0
+            scale_outputs["accs"][f"{x},{y}"] = 0.0
+            scale_outputs["FP"][f"{x},{y}"] = 0.0
+
 
         # Loop through predictions and targets at each scale and compute the loss at each scale
         for pred, target in zip(predictions, targets):
@@ -109,13 +117,21 @@ class CustomLoss(nn.Module):
             total_acc += acc
             total_FP += false_positives
             x, y = pred.shape[1:3]
-            scale_losses[f"{x},{y}"] = float(scale_loss)
+            scale_outputs["losses"][f"{x},{y}"] += float(scale_loss)
+            scale_outputs["accs"][f"{x},{y}"] += float(acc)
+            scale_outputs["FP"][f"{x},{y}"] += float(false_positives)
         
         # Average the losses across scales
         average_loss = total_loss / len(predictions)
         average_acc = total_acc / len(predictions)
+
+        # Average data across the batch
+        total_FP /= predictions[0].shape[0]
+        for key in scale_outputs.keys():
+            for scale, value in scale_outputs[key].items():
+                scale_outputs[key][scale] = value / predictions[0].shape[0]
         
-        return average_loss, scale_losses, average_acc, total_FP
+        return average_loss, scale_outputs, average_acc, total_FP
 
     def compute_scale_loss(self, pred, target):
         """
@@ -173,11 +189,13 @@ class CustomLoss(nn.Module):
             # Compute the confidence loss for the current keypoint
             #loss_conf = F.binary_cross_entropy(pred_conf.view(-1), target_conf.view(-1))
             
+            #pred_conf_masked = pred_conf * mask
+
             loss_conf = binary_cross_entropy(pred_conf, target_conf)
 
             # Accumulate the losses
             #keypoint_loss = loss_x + loss_y + (loss_conf * 10)
-            keypoint_loss = loss_conf * 10
+            keypoint_loss = loss_conf
             scale_loss += keypoint_loss
 
              # Calculate true positives and false positives
@@ -220,10 +238,7 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
     epoch_positive_accuracy = 0.0
     epoch_false_positives = 0.0
 
-    scale_losses_total = {'15,15': 0,
-                          '30,30': 0,
-                          '60,60': 0,
-                          '120,120': 0}
+    scale_outputs_batch = {"losses": {}, "accs": {}, "FP": {}}
 
     if update_weights:
         optimiser.zero_grad()
@@ -233,7 +248,7 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
         outputs = model(images)
 
         # Compute loss
-        loss, scale_losses, positive_accuracy, false_positives = criterion(outputs, targets)
+        loss, scale_outputs, positive_accuracy, false_positives = criterion(outputs, targets)
         epoch_positive_accuracy += positive_accuracy
         epoch_false_positives += false_positives
 
@@ -249,8 +264,9 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
 
         # Accumulate loss
         epoch_loss += loss.item()
-        for key, value in scale_losses.items():
-            scale_losses_total[key] += value
+        for output in scale_outputs.keys():
+            for scale, value in scale_outputs_batch[output].items():
+                scale_outputs_batch[output][scale] += value
 
     # Update weights
     if update_weights:
@@ -265,18 +281,20 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
     epoch_positive_accuracy /= len(dataloader)
     epoch_false_positives /= len(dataloader)
 
-    for key in scale_losses_total:
-        scale_losses_total[key] /= len(dataloader)
 
-    return epoch_loss, scale_losses_total, epoch_positive_accuracy, epoch_false_positives
+    for output in scale_outputs_batch.keys():
+        for scale, value in scale_outputs_batch[output].items():
+            scale_outputs_batch[output][scale] /= len(dataloader)
+
+    return epoch_loss, scale_outputs_batch, epoch_positive_accuracy, epoch_false_positives
 
 def main():
     #torch.manual_seed(1)
 
     image_width = image_height = 960
-    num_epochs = 100
-    lr = 3e-5
-    momentum = 0.95
+    num_epochs = 30
+    lr = 1e-4
+    momentum = 0.9
     weight_decay = 0.15
     lr_decay = True  # Learning rate decay
     model_name = f'{num_epochs}_epochs_{lr}_lr_{momentum}_m_{weight_decay}_wd_lr_decay={lr_decay}'
@@ -289,8 +307,9 @@ def main():
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [2626, 500, 4])
+    train_set, val_set = torch.utils.data.random_split(dataset, [830, 300])
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [500, 300, 2330])
-    train_set, val_set, temp = torch.utils.data.random_split(dataset, [1000, 300, 1830])
+    #train_set, val_set, temp = torch.utils.data.random_split(dataset, [1000, 300, 1830])
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [1, 1, 1468])
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size)
@@ -348,7 +367,7 @@ def main():
 
     # Scheduler for learning rate decay
     if lr_decay:
-        scheduler = lr_scheduler.StepLR(optimiser, step_size=25, gamma=0.5)
+        scheduler = lr_scheduler.StepLR(optimiser, step_size=10, gamma=0.5)
     else:
         scheduler = None
 
@@ -360,27 +379,27 @@ def main():
         file.write("Epoch,Training Loss,Validation Loss\n")
         
         # Print losses before the first epoch
-        epoch_loss, train_losses, train_acc, train_FP = run_epoch(model, train_loader, criterion, update_weights=False)
-        val_loss, val_losses, val_acc, val_FP = run_epoch(model, val_loader, criterion, update_weights=False)
+        epoch_loss, train_scale_outputs, train_acc, train_FP = run_epoch(model, train_loader, criterion, update_weights=False)
+        val_loss, val_scale_outputs, val_acc, val_FP = run_epoch(model, val_loader, criterion, update_weights=False)
         print(f'==== Epoch [0/{num_epochs}] ====')
         print(f'Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}')
-        print(f"Training accuracy: {train_acc}, Validation accuracy: {val_acc}")
+        print(f"Training accuracy: {train_acc*100}%, Validation accuracy: {val_acc*100}%")
         print(f"Training false positives: {train_FP}, Validation false positives: {val_FP}")
-        print(f"Train losses: {train_losses}")
-        print(f"Val losses: {val_losses}")
+        print(f"Train losses: {train_scale_outputs["losses"]}")
+        print(f"Val losses: {val_scale_outputs["losses"]}")
         file.write(f"0,{epoch_loss},{val_loss}\n")
 
         for epoch in range(num_epochs):
             start_time = time.time()
-            epoch_loss, train_losses, train_acc, train_FP = run_epoch(model, train_loader, criterion, optimiser, scheduler)
-            val_loss, val_losses, val_acc, val_FP = run_epoch(model, val_loader, criterion, update_weights=False)
+            epoch_loss, train_scale_outputs, train_acc, train_FP = run_epoch(model, train_loader, criterion, optimiser, scheduler)
+            val_loss, val_scale_outputs, val_acc, val_FP = run_epoch(model, val_loader, criterion, update_weights=False)
             end_time = time.time()
             print(f'==== Epoch [{epoch+1}/{num_epochs}] ====  Time: {end_time-start_time}s')
             print(f'Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}')
-            print(f"Training accuracy: {train_acc}, Validation accuracy: {val_acc}")
+            print(f"Training accuracy: {train_acc*100}%, Validation accuracy: {val_acc*100}%")
             print(f"Training false positives: {train_FP}, Validation false positives: {val_FP}")
-            print(f"Train losses: {train_losses}")
-            print(f"Val losses: {val_losses}")
+            print(f"Train losses: {train_scale_outputs["losses"]}")
+            print(f"Val losses: {val_scale_outputs["losses"]}")
 
             # Write epoch results to file
             file.write(f"{epoch+1},{epoch_loss},{val_loss}\n")

@@ -168,18 +168,18 @@ def video_inference(model, video_path, output_path, batch_size=1, device="cpu", 
     cv2.destroyAllWindows()
 
 
-def test_model_output(model, image, original_image, device):
+def test_model_output(model, image, original_image, device, true, i):
     model.eval()
     _, out2 = model(image)
 
     with torch.no_grad():
         #outputs = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
-        keypoints = elbow_wrist_nms(out2, 0.1, overlap_distance=0.01)
+        keypoints = elbow_wrist_nms(true, 0.5, overlap_distance=0)
         pass
 
     plot_keypoints(original_image, keypoints[0])
 
-    cv2.imwrite('output_test.png', original_image)
+    cv2.imwrite(f'output_test{i}.png', original_image)
 
     return out2
 
@@ -190,7 +190,7 @@ def main():
     #weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     #model = weigths['model']
 
-    model = torch.load('50_epochs_0.0001_lr_0.9_m_0.1_wd_lr_decay=False.pt', map_location=device)
+    model = torch.load('100_epochs_0.001_lr_0.9_m_0.15_wd_lr_decay=True.pt', map_location=device)
     
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
@@ -205,23 +205,26 @@ def main():
     input_path = './test_images/image430.png'
     output_path = './test_images/image_with_keypoints.png'
 
-    im_index = 50 #24 # 430 # 400
-    original_image = cv2.imread(f'../images/labeled_images/image{im_index}.png')
-    input, targets = dataset.__getitem__(im_index)
-    input = input.view(1, 3, 960, 960)
-    batched_targets = []
-    for target in targets:
-        batched_targets.append(target.unsqueeze(0))
+    im_index = 1130 #24 # 430 # 400
+    for i in range(10):
+        original_image = cv2.imread(f'../images/labeled_images/image{im_index + i}.png')
+        input, targets = dataset.__getitem__(im_index + i)
+        input = input.view(1, 3, 960, 960)
+        batched_targets = []
+        for target in targets:
+            batched_targets.append(target.unsqueeze(0))
+    
+        output = test_model_output(model, input, original_image, device, batched_targets, i)
 
-    output = test_model_output(model, input, original_image, device)
+    #loss, scale_outputs = criterion(output, batched_targets)[0:2]
 
-    loss = criterion(output, batched_targets)[0]
-
-    print("Loss:", loss)
+    #print("Loss:", loss)
+    #print("Scale losses:", scale_outputs["losses"])
+    #print("Scale accs:", scale_outputs["accs"])
+    #print("Scale FP:", scale_outputs["FP"])
 
     #test_model_output(model, input_path, device)
     #video_inference(model, input_path, output_path, batch_size, device=device, left_handed=False, tracking=True)
-
 
 if __name__ == "__main__":
     main()

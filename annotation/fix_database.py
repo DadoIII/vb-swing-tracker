@@ -68,7 +68,6 @@ def main():
             image_count += 1
 
     os.rmdir(old_images)
-
-        
+ 
 if __name__ == "__main__":
     main()

@@ -103,7 +103,23 @@ def get_center_crop() -> np.ndarray:
     # Get the offset of the crop on the image
     offset_x = int(WIDTH_OFFSET - (x_center - width // 2))
     offset_y = int(HEIGHT_OFFSET - (y_center - height // 2))
-    center_image = image_utils.crop_image(cv_image, start_x=offset_x, start_y=offset_y, width=IMAGE_SIZE+CROP_SIZE, height=IMAGE_SIZE+CROP_SIZE)
+
+
+    # Crop the image
+    center_image = cv_image[max(0, offset_y) : offset_y+IMAGE_SIZE+CROP_SIZE, max(0, offset_x) : offset_x+IMAGE_SIZE+CROP_SIZE]
+
+    # Fix the labels in case the crop was not centered
+    image_offset_right = max(0, IMAGE_SIZE + CROP_SIZE + offset_x - width)
+    image_offset_bottom = max(0, IMAGE_SIZE + CROP_SIZE + offset_y - height)
+    label_offset_x = (image_offset_right + min(0, offset_x)) // 2
+    label_offset_y = (image_offset_bottom + min(0, offset_y)) // 2
+
+    #print(image_offset_right, -offset_x)
+    #print(image_offset_bottom, -offset_y)
+    #print(label_offset_x, label_offset_y)
+
+    for key, keypoint in positions.items():
+        positions[key] = [(x + label_offset_x, y + label_offset_y) for (x, y) in keypoint]
 
     return center_image
 
@@ -179,13 +195,14 @@ def save_labels():
 
     # Perform the crops and save the image and labels
     center_image = get_center_crop()
-    if type(center_image) == str and center_image == "User cancel":
-        print("Successfully canceled the crop, adjust the position of the image and continue.")
-        return
 
     labeled_images = image_utils.ten_crop(center_image, positions)
-    for labeled_image in labeled_images:
-        add_labeled_image(labeled_image)
+    if type(labeled_images) == str and labeled_images == "User cancel":
+        print("Successfully canceled the crop, adjust the position of the image and continue.")
+        return
+    else:
+        for labeled_image in labeled_images:
+            add_labeled_image(labeled_image)
     
     print("10 images and labels saved successfully!")
 
