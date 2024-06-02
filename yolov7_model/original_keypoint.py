@@ -14,7 +14,7 @@ _ = model.float().eval()
 if torch.cuda.is_available():
     model.half().to(device)
 
-im_index = 2304
+im_index = 1900
 output_path = './test_images/image_with_keypoints.png'
 image = cv2.imread(f'../images/labeled_images/image{im_index}.png')
 image = letterbox(image, 960, stride=64, auto=True)[0]
@@ -24,15 +24,18 @@ image = torch.tensor(np.array([image.numpy()]))
 
 if torch.cuda.is_available():
     image = image.half().to(device)   
-output, _ = model(image)
+output, out2 = model(image)
 
-output = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
-with torch.no_grad():
-    output = output_to_keypoint(output)
-nimg = image[0].permute(1, 2, 0) * 255
-nimg = nimg.cpu().numpy().astype(np.uint8)
-nimg = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
-for idx in range(output.shape[0]):
-    plot_skeleton_kpts(nimg, output[idx, 7:].T, 3)
+print(out2[0].shape, out2[1].shape)
+print(out2[0])
 
-cv2.imwrite('output_test.png', nimg)
+# output = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
+# with torch.no_grad():
+#     output = output_to_keypoint(output)
+# nimg = image[0].permute(1, 2, 0) * 255
+# nimg = nimg.cpu().numpy().astype(np.uint8)
+# nimg = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
+# for idx in range(output.shape[0]):
+#     plot_skeleton_kpts(nimg, output[idx, 7:].T, 3)
+
+# cv2.imwrite('output_test.png', nimg)

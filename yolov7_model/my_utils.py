@@ -128,7 +128,7 @@ def get_keypoint_distance(kpt1, kpt2):
     """Calucate the euclidian distance between two keypoints (x1, y1), (x2, y2)"""
     return math.sqrt((kpt1[0] - kpt2[0]) ** 2 + (kpt1[1] - kpt2[1]) ** 2)
 
-def get_elbow_from_skeleton(kpts, left_handed=False, check_confidence=False, confidence_threshold=0.5, ):
+def get_elbow_from_skeleton(kpts, left_handed=False, check_confidence=False, confidence_threshold=0.5):
     """
     Gets the x, y, confidence values of the elbow from the full yolov7-keypoints skeleton.
 
