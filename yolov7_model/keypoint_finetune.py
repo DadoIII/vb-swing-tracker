@@ -191,25 +191,39 @@ class CustomLoss(nn.Module):
 
 
     def compute_benchmark(self, predictions, targets):
-        positions = ["elbow_right", "wrist_right", "elbow_left", "wrist_left"]
+        POSITIONS = ("elbow_right", "wrist_right", "elbow_left", "wrist_left")
         scale_outputs = {"accs": {}, "FP": {}}
         
-        for prediction, target in zip(predictions, targets):
-            bs, x_count, y_count, _ = predictions.shape
-            x_size, y_size = self.image_width / x_count, self.image_height / y_count
+        bs, x_count, y_count, _ = targets[0].shape
+        x_size, y_size = self.image_width / x_count, self.image_height / y_count
+
+        # Collect the coordinates of the targets
+        total_TP = [0 for _ in range(bs)]
+        total_FP = [0 for _ in range(bs)]
+        true_positives = [{"elbow_right": {}, "wrist_right": {}, "elbow_left": {}, "wrist_left": {}} for _ in range(bs)]
+
+        for batch in range(bs):
+            for keypoint_index in range(0, 11, 3):
+                mask = targets[0][batch, :, :, keypoint_index+2] > 0.5
+                indices = torch.nonzero(mask)
+
+                for idx in indices:
+                    x, y = idx.tolist()
+                    x_pos = str(int(x * x_size + x_size * targets[0][batch, x, y, keypoint_index]))
+                    y_pos = str(int(y * y_size + y_size * targets[0][batch, x, y, keypoint_index+1]))
+                    total_TP[batch] += 1
+                    true_positives[batch][POSITIONS[keypoint_index//3]][x_pos + "," + y_pos] = False
 
 
-            true_positives = {"elbow_right": {}, "wrist_right": {}, "elbow_left": {}, "wrist_left": {}}
-            total_FP = 0
-            for b in bs:
-                for x in x_size:
-                    for y in y_size:
-                        keypoints = targets[bs, x, y, :]
-                        for i in range(4):
-                            x_pos, y_pos, conf = keypoints[i*3], keypoints[i*3+1], keypoints[i*3+2]
-                            if conf == 1:
-                                true_positives[positions[i]][str(x * x_size + x_size * x_pos) + "," + str(y * y_size + y_size * y_pos)] = False
-
+            # for b in bs:
+            #     for x in x_size:
+            #         for y in y_size:
+            #             keypoints = targets[bs, x, y, :]
+            #             for i in range(4):
+            #                 x_pos, y_pos, conf = keypoints[i*3], keypoints[i*3+1], keypoints[i*3+2]
+            #                 if conf == 1:
+            #                     true_positives[positions[i]][str(x * x_size + x_size * x_pos) + "," + str(y * y_size + y_size * y_pos)] = False
+        return total_TP, true_positives
 
 
 def read_csv_file(file_path):
@@ -327,7 +341,7 @@ def main():
     #torch.manual_seed(1)
 
     image_width = image_height = 960
-    num_epochs = 150
+    num_epochs = 50
     lr = 5e-4
     momentum = 0.9
     weight_decay = 0.15
@@ -343,7 +357,7 @@ def main():
     scales = [(30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [2626, 500, 4])
-    train_set, val_set = torch.utils.data.random_split(dataset, [1700, 240])
+    train_set, val_set = torch.utils.data.random_split(dataset, [2200, 250])
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [500, 300, 2330])
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [1000, 300, 1830])
     #train_set, val_set, temp = torch.utils.data.random_split(dataset, [1, 1, 1468])
@@ -353,33 +367,21 @@ def main():
     #Initialise loss
     criterion = CustomLoss(image_width, image_height)
 
-    #optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
-    optimiser = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=momentum, weight_decay=weight_decay, nesterov=True)
-
-    # Scheduler for learning rate decay
-    if lr_decay:
-        scheduler = lr_scheduler.StepLR(optimiser, step_size=50, gamma=0.5)
-    else:
-        scheduler = None
-
     # Define model
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
     _ = model.eval()
 
-    if torch.cuda.is_available():
-        model.half().to(device)
-
-    target_train_loss, target_train_scale_outputs = run_epoch(model, train_loader, criterion, update_weights=False)
-    target_val_loss, target_val_scale_outputs = run_epoch(model, val_loader, criterion, update_weights=False)
-    target_stats = f'''===== Target stats =====
-Training Loss: {target_train_loss:.4f}, Validation Loss: {target_val_loss:.4f}
-Training accuracy: {target_train_scale_outputs['accs']}%
-Validation accuracy: {target_val_scale_outputs['accs']}%
-Training false positives: {target_train_scale_outputs['FP']}
-Validation false positives: {target_val_scale_outputs['FP']}
-Train losses: {target_train_scale_outputs['losses']}
-Val losses: {target_val_scale_outputs['losses']}'''
+#     target_train_loss, target_train_scale_outputs = run_epoch(model, train_loader, criterion, update_weights=False)
+#     target_val_loss, target_val_scale_outputs = run_epoch(model, val_loader, criterion, update_weights=False)
+#     target_stats = f'''===== Target stats =====
+# Training Loss: {target_train_loss:.4f}, Validation Loss: {target_val_loss:.4f}
+# Training accuracy: {target_train_scale_outputs['accs']}%
+# Validation accuracy: {target_val_scale_outputs['accs']}%
+# Training false positives: {target_train_scale_outputs['FP']}
+# Validation false positives: {target_val_scale_outputs['FP']}
+# Train losses: {target_train_scale_outputs['losses']}
+# Val losses: {target_val_scale_outputs['losses']}'''
 
 
     # Adjust model
@@ -418,12 +420,17 @@ Val losses: {target_val_scale_outputs['losses']}'''
         #         for param in layer.parameters():
         #             param.requires_grad = True
 
-    # if torch.cuda.is_available():
-    #     model.half().to(device)
+    if torch.cuda.is_available():
+        model.half().to(device)
 
-    #model.to(torch.float32)
-    #dummy_input = torch.randn(1, 3, 960, 960).half()
-    #summary(model, (1, 3, 960, 960), input=dummy_input)
+    #optimiser = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
+    optimiser = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=momentum, weight_decay=weight_decay, nesterov=True)
+
+    # Scheduler for learning rate decay
+    if lr_decay:
+        scheduler = lr_scheduler.StepLR(optimiser, step_size=50, gamma=0.5)
+    else:
+        scheduler = None
 
     # Empty the txt file
     with open("gradient_log.txt", "w") as gradient_log:

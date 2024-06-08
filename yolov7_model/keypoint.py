@@ -190,7 +190,7 @@ def main():
     #weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     #model = weigths['model']
 
-    model = torch.load('99_epochs_0.0008_lr_0.9_m_0.15_wd_lr_decay=True.pt', map_location=device)
+    #model = torch.load('99_epochs_0.0008_lr_0.9_m_0.15_wd_lr_decay=True.pt', map_location=device)
     
     labeled_image_folder = "../images/labeled_images/"
     scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
@@ -198,9 +198,13 @@ def main():
 
     criterion = CustomLoss(960, 960)
 
-    _ = model.float().train()
-    if torch.cuda.is_available():
-        model.half().to(device)
+    targets = [x.unsqueeze(0) for x in dataset.__getitem__(0)[1]]
+    print(len(targets), targets[0].shape)
+    print(criterion.compute_benchmark([], targets))
+
+    # _ = model.float().train()
+    # if torch.cuda.is_available():
+    #     model.half().to(device)
 
     input_path = './test_images/image430.png'
     output_path = './test_images/image_with_keypoints.png'
@@ -219,15 +223,15 @@ def main():
     #input, targets = dataset.__getitem__(im_index)
     #input = image.view(1, 3, 960, 960)
 
-    image = cv2.imread(f'../images/test_images/test1.png')
-    #input = letterbox(image, 960, stride=64, auto=True)[0]
-    #input_ = input.copy()
-    input = transforms.ToTensor()(image)
-    input = torch.tensor(np.array([input.numpy()]))
-    if torch.cuda.is_available():
-        input = input.half().to(device)
+    # image = cv2.imread(f'../images/test_images/test1.png')
+    # #input = letterbox(image, 960, stride=64, auto=True)[0]
+    # #input_ = input.copy()
+    # input = transforms.ToTensor()(image)
+    # input = torch.tensor(np.array([input.numpy()]))
+    # if torch.cuda.is_available():
+    #     input = input.half().to(device)
 
-    output = test_model_output(model, input, image, device, None, None)
+    # output = test_model_output(model, input, image, device, None, None)
 
     #loss, scale_outputs = criterion(output, batched_targets)[0:2]
 
