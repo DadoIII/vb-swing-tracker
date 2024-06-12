@@ -187,8 +187,10 @@ def main():
     #torch.manual_seed(1)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    #weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
-    #model = weigths['model']
+    weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
+    model = weigths['model']
+
+    model.eval()
 
     #model = torch.load('99_epochs_0.0008_lr_0.9_m_0.15_wd_lr_decay=True.pt', map_location=device)
     
@@ -198,10 +200,6 @@ def main():
 
     criterion = CustomLoss(960, 960)
 
-    targets = [x.unsqueeze(0) for x in dataset.__getitem__(0)[1]]
-    print(len(targets), targets[0].shape)
-    print(criterion.compute_benchmark([], targets))
-
     # _ = model.float().train()
     # if torch.cuda.is_available():
     #     model.half().to(device)
@@ -209,14 +207,29 @@ def main():
     input_path = './test_images/image430.png'
     output_path = './test_images/image_with_keypoints.png'
 
-    # im_index = 1130 #24 # 430 # 400
-    # for i in range(10):
-    #     original_image = cv2.imread(f'../images/labeled_images/image{im_index + i}.png')
-    #     input, targets = dataset.__getitem__(im_index + i)
-    #     input = input.view(1, 3, 960, 960)
-    #     batched_targets = []
-    #     for target in targets:
-    #         batched_targets.append(target.unsqueeze(0))
+    im_index = 0 #24 # 430 # 400
+    predictions = []
+    targets = []
+    for i in range(2):
+        #original_image = cv2.imread(f'../images/labeled_images/image{im_index + i}.png')
+        input, target = dataset.__getitem__(im_index + i)
+        input = input.view(1, 3, 960, 960)
+        targets.append(target)
+        out, _ = model(input)
+        predictions.append(output_to_keypoint(non_max_suppression_kpt(out, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)))
+
+    #print(targets[0][0].shape)
+    print(len(predictions), predictions[0].shape, predictions[1].shape)
+
+    # targets = [torch.stack((tensors), dim=0) for tensors in zip(*targets)]
+    # predictions = [torch.stack((tensors), dim=0).squeeze() for tensors in zip(*predictions)]
+    # print(len(targets), targets[0].shape)
+    # print(len(predictions), predictions[0].shape)
+    # print(criterion.compute_benchmark(predictions, targets))
+
+    # batched_targets = []
+    # for target in targets:
+    #     batched_targets.append(target.unsqueeze(0))
 
     #im_index = 170
     #image = cv2.imread(f'../images/labeled_images/image{im_index}.png')

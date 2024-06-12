@@ -209,21 +209,43 @@ class CustomLoss(nn.Module):
 
                 for idx in indices:
                     x, y = idx.tolist()
-                    x_pos = str(int(x * x_size + x_size * targets[0][batch, x, y, keypoint_index]))
-                    y_pos = str(int(y * y_size + y_size * targets[0][batch, x, y, keypoint_index+1]))
+                    x_pos = int(x * x_size + x_size * targets[0][batch, x, y, keypoint_index])
+                    y_pos = int(y * y_size + y_size * targets[0][batch, x, y, keypoint_index+1])
                     total_TP[batch] += 1
-                    true_positives[batch][POSITIONS[keypoint_index//3]][x_pos + "," + y_pos] = False
+                    true_positives[batch][POSITIONS[keypoint_index//3]][(x_pos, y_pos)] = False
 
+        # Collect positive predicitons from the original yolov7 model
+        # And calculate the the number of FP and accuracy
+        for scale in predictions:
+            for batch in range(bs):
+                for i, keypoint_index in enumerate([24, 30, 21, 27]):
+                    true_positions = list(true_positives[batch][POSITIONS[i]].keys())
+                    mask = scale[batch, :, :, :, keypoint_index+2] > 0.5
+                    indices = torch.nonzero(mask)
 
-            # for b in bs:
-            #     for x in x_size:
-            #         for y in y_size:
-            #             keypoints = targets[bs, x, y, :]
-            #             for i in range(4):
-            #                 x_pos, y_pos, conf = keypoints[i*3], keypoints[i*3+1], keypoints[i*3+2]
-            #                 if conf == 1:
-            #                     true_positives[positions[i]][str(x * x_size + x_size * x_pos) + "," + str(y * y_size + y_size * y_pos)] = False
-        return total_TP, true_positives
+                    for idx in indices:
+                        _, x, y = idx.tolist()
+                        x_lower = x * x_size
+                        x_higher = x_lower + x_size
+                        y_lower = y * y_size
+                        y_higher = y_lower + y_size
+
+                        for (true_x, true_y) in true_positions:
+                            if true_x >= x_lower and true_x < x_higher and \
+                               true_y >= y_lower and true_y < y_higher:
+                                true_positives[batch][POSITIONS[i]][(true_x, true_y)] = True
+
+                            else:
+                                total_FP[batch] += 1
+
+        acc_sum = 0
+        for i, batch_TP in enumerate(true_positives):
+            temp_sum = 0
+            for keypoint_type in list(batch_TP.values()):
+                temp_sum += sum(list(keypoint_type.values()))
+            acc_sum += temp_sum / total_TP[i]
+        
+        return acc_sum / bs, sum(total_FP) / bs
 
 
 def read_csv_file(file_path):

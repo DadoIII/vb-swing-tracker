@@ -26,8 +26,7 @@ if torch.cuda.is_available():
     image = image.half().to(device)   
 output, out2 = model(image)
 
-print(out2[0].shape, out2[1].shape)
-print(out2[0])
+print(output.shape, out2[0].shape)
 
 # output = non_max_suppression_kpt(output, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
 # with torch.no_grad():
