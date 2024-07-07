@@ -148,11 +148,10 @@ def get_elbow_from_skeleton(kpts, left_handed=False, check_confidence=False, con
         pos = kpts[7*3:8*3]
     else:
         pos = kpts[8*3:9*3]
-
     if not check_confidence:
         return pos
     elif pos[-1] > confidence_threshold:
-        return pos[:2]
+        return tuple(pos[:2])
     else:
         return None
 
@@ -181,7 +180,7 @@ def get_wrist_from_skeleton(kpts, left_handed=False, check_confidence=False, con
     if not check_confidence:
         return pos
     elif pos[-1] > confidence_threshold:
-        return pos[:2]
+        return tuple(pos[:2])
     else:
         return None
 

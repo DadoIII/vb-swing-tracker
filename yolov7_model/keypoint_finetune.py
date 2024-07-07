@@ -190,7 +190,7 @@ class CustomLoss(nn.Module):
         return scale_loss, positive_accuracy, false_positives
 
 
-    def compute_benchmark(self, predictions, targets):
+    def compute_benchmark(self, predictions, targets, confidence = 0.5):
         POSITIONS = ("elbow_right", "wrist_right", "elbow_left", "wrist_left")
         scale_outputs = {"accs": {}, "FP": {}}
         
@@ -216,27 +216,31 @@ class CustomLoss(nn.Module):
 
         # Collect positive predicitons from the original yolov7 model
         # And calculate the the number of FP and accuracy
-        for scale in predictions:
-            for batch in range(bs):
-                for i, keypoint_index in enumerate([24, 30, 21, 27]):
-                    true_positions = list(true_positives[batch][POSITIONS[i]].keys())
-                    mask = scale[batch, :, :, :, keypoint_index+2] > 0.5
-                    indices = torch.nonzero(mask)
+        for batch, prediction in enumerate(predictions):
+            prediction_keypoints = [[] for _ in range(4)]
+            for skeleton in prediction:
+                if (right_elbow := get_elbow_from_skeleton(skeleton, left_handed=False, check_confidence=True, confidence_threshold=confidence)) is not None:
+                    prediction_keypoints[0].append(right_elbow) 
+                if (right_wrist := get_wrist_from_skeleton(skeleton, left_handed=False, check_confidence=True, confidence_threshold=confidence)) is not None:
+                    prediction_keypoints[1].append(right_wrist)
+                if (left_elbow := get_elbow_from_skeleton(skeleton, left_handed=True, check_confidence=True, confidence_threshold=confidence)) is not None:
+                    prediction_keypoints[2].append(left_elbow)
+                if (left_wrist := get_wrist_from_skeleton(skeleton, left_handed=True, check_confidence=True, confidence_threshold=confidence)) is not None:
+                    prediction_keypoints[3].append(left_wrist)
 
-                    for idx in indices:
-                        _, x, y = idx.tolist()
-                        x_lower = x * x_size
-                        x_higher = x_lower + x_size
-                        y_lower = y * y_size
-                        y_higher = y_lower + y_size
-
-                        for (true_x, true_y) in true_positions:
-                            if true_x >= x_lower and true_x < x_higher and \
-                               true_y >= y_lower and true_y < y_higher:
-                                true_positives[batch][POSITIONS[i]][(true_x, true_y)] = True
-
-                            else:
-                                total_FP[batch] += 1
+            for pos in range(4):
+                true_keypoints = true_positives[batch][POSITIONS[pos]]                
+                for keypoint in prediction_keypoints[pos]: 
+                    false_positive = True 
+                    for true_keypoint in true_keypoints.keys():
+                        #print(get_keypoint_distance(keypoint, true_keypoint))
+                        if true_keypoints[true_keypoint] == False and get_keypoint_distance(keypoint, true_keypoint) <= 0.04 * (self.image_width + self.image_height) / 2:
+                            true_keypoints[true_keypoint] = True
+                            total_TP[batch] += 1
+                            false_positive = False
+                            break
+                    if false_positive:
+                        total_FP[batch] += 1
 
         acc_sum = 0
         for i, batch_TP in enumerate(true_positives):

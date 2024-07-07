@@ -219,13 +219,14 @@ def main():
         predictions.append(output_to_keypoint(non_max_suppression_kpt(out, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)))
 
     #print(targets[0][0].shape)
-    print(len(predictions), predictions[0].shape, predictions[1].shape)
+    # print(len(predictions), predictions[0].shape, predictions[1].shape)
+    # print(predictions[0])
 
-    # targets = [torch.stack((tensors), dim=0) for tensors in zip(*targets)]
-    # predictions = [torch.stack((tensors), dim=0).squeeze() for tensors in zip(*predictions)]
-    # print(len(targets), targets[0].shape)
-    # print(len(predictions), predictions[0].shape)
-    # print(criterion.compute_benchmark(predictions, targets))
+    targets = [torch.stack((tensors), dim=0) for tensors in zip(*targets)]
+    predictions = [pred[:, 7:] for pred in predictions] #Get rid of the first 7 non important numbers and only keep all the keypoints
+    print(len(targets), targets[0].shape)
+    print(len(predictions), predictions[0].shape)
+    print(criterion.compute_benchmark(predictions, targets))
 
     # batched_targets = []
     # for target in targets:
