@@ -233,10 +233,8 @@ class CustomLoss(nn.Module):
                 for keypoint in prediction_keypoints[pos]: 
                     false_positive = True 
                     for true_keypoint in true_keypoints.keys():
-                        #print(get_keypoint_distance(keypoint, true_keypoint))
                         if true_keypoints[true_keypoint] == False and get_keypoint_distance(keypoint, true_keypoint) <= 0.04 * (self.image_width + self.image_height) / 2:
                             true_keypoints[true_keypoint] = True
-                            total_TP[batch] += 1
                             false_positive = False
                             break
                     if false_positive:

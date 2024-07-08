@@ -207,7 +207,7 @@ def main():
     input_path = './test_images/image430.png'
     output_path = './test_images/image_with_keypoints.png'
 
-    im_index = 0 #24 # 430 # 400
+    im_index = 260 #24 # 430 # 400
     predictions = []
     targets = []
     for i in range(2):
