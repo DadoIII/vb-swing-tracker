@@ -332,33 +332,26 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
 def run_benchmark(model, dataloader, criterion):
     model.eval()
 
-    scale_outputs_batch = {"accs": {}, "FP": {}}
+    total_acc, total_FP = 0, 0
 
     for batch_idx, (images, targets) in enumerate(dataloader):
         # Forward pass
-        outputs = model(images)
+        outputs, _ = model(images)
 
-        # Compute loss
-        scale_outputs = criterion.compute_benchmark(outputs, targets)
+        # Change the output from stacked tensorst to a tensor list
+        # As well as pass it through some processing steps to get the keypoint coordinates
+        output_list = [output_to_keypoint(non_max_suppression_kpt(outputs[i], 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True))[:, 7:] for i in range(outputs.shape[0])]
 
-       
-        # Accumulate loss
-        for output in scale_outputs.keys():
-            for scale, value in scale_outputs[output].items():
-                if scale in scale_outputs_batch[output].keys():
-                    scale_outputs_batch[output][scale] += value
-                else:
-                    scale_outputs_batch[output][scale] = value
+        # Compute benchamark accuracy and false positives for the batch
+        batch_acc, batch_FP = criterion.compute_benchmark(output_list, targets)
 
-
-    for output in scale_outputs_batch.keys():
-        for scale, value in scale_outputs_batch[output].items():
-            if output == 'accs':
-                scale_outputs_batch[output][scale] = round(scale_outputs_batch[output][scale] / len(dataloader) * 100, 1)
-            elif output == 'FP':
-                scale_outputs_batch[output][scale] = round(scale_outputs_batch[output][scale] / len(dataloader))
-
-    return scale_outputs_batch
+        # Accumulate accuracy and false positives
+        total_acc += batch_acc
+        total_FP += batch_FP
+        
+    # Divide by number of batches
+    num_batches = len(dataloader)
+    return total_acc / num_batches * 100, total_FP / num_batches
 
 
 def main():
@@ -375,7 +368,7 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create dataset
-    batch_size = 6
+    batch_size = 5
     labeled_image_folder = "../images/labeled_images/"
     #scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     scales = [(30, 30), (15, 15)]
@@ -392,6 +385,7 @@ def main():
     criterion = CustomLoss(image_width, image_height)
 
     # Define model
+    benchmark_model = torch.load('yolov7-w6-pose.pt', map_location=device)['model']
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
     _ = model.eval()
@@ -463,6 +457,12 @@ def main():
     with open('training_progress_' + model_name + '.txt', 'w') as file:
         file.write("Epoch,Training Loss,Validation Loss\n")
         
+        benchmark_acc_train, benchmark_FP_train = run_benchmark(benchmark_model, train_loader, criterion)
+        benchmark_acc_val, benchmark_FP_val = run_benchmark(benchmark_model, train_loader, criterion)
+        print(f'==== Benchmark ====')
+        print(f'Training Accuracy: {benchmark_acc_train:.4f}%, Validation Accuracy: {benchmark_acc_val:.4f}%')
+        print(f'Training false positives per image: {benchmark_FP_train}, Validation false positive per image: {benchmark_FP_val}')
+
         # Print losses before the first epoch
         epoch_loss, train_scale_outputs = run_epoch(model, train_loader, criterion, update_weights=False)
         val_loss, val_scale_outputs = run_epoch(model, val_loader, criterion, update_weights=False)
