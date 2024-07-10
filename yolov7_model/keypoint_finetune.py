@@ -245,7 +245,11 @@ class CustomLoss(nn.Module):
             temp_sum = 0
             for keypoint_type in list(batch_TP.values()):
                 temp_sum += sum(list(keypoint_type.values()))
-            acc_sum += temp_sum / total_TP[i]
+            if total_TP[i] == 0:
+                print(f"0 total true positives... temp_sum = {temp_sum}")
+                acc_sum += 1
+            else:
+                acc_sum += temp_sum / total_TP[i]
         
         return acc_sum / bs, sum(total_FP) / bs
 
@@ -282,13 +286,15 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
         optimiser.zero_grad()
 
     for batch_idx, (images, targets) in enumerate(dataloader):
-        # Forward pass
-        outputs = model(images)
-
-        # Compute loss
-        loss, scale_outputs = criterion(outputs, targets)
-
         if update_weights:
+            # Training mode - with gradient computation
+            
+            # Forward pass
+            outputs = model(images)
+
+            # Compute loss
+            loss, scale_outputs = criterion(outputs, targets)
+
             # Backward pass
             loss.backward()
 
@@ -297,6 +303,11 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
                 for name, param in model.named_parameters():
                     if param.grad is not None and name.startswith('model.118.m_kpt.3.11'):
                         gradient_log.write(f'Parameter: {name}, Mean Gradient: {param.grad.mean()}, Max Gradient: {param.grad.max()}, Min Gradient: {param.grad.min()}\n')
+        else:
+            # Validation mode - without gradient computation            
+            with torch.no_grad():
+                outputs = model(images)
+                loss, scale_outputs = criterion(outputs, targets)
 
         # Accumulate loss
         epoch_loss += loss.item()
@@ -331,12 +342,15 @@ def run_epoch(model, dataloader, criterion, optimiser=None, scheduler=None, upda
 
 def run_benchmark(model, dataloader, criterion):
     model.eval()
+    print("Benchmark start")
 
     total_acc, total_FP = 0, 0
 
     for batch_idx, (images, targets) in enumerate(dataloader):
+        print(f"Batch {batch_idx}")
         # Forward pass
-        outputs, _ = model(images)
+        with torch.no_grad():
+            outputs, _ = model(images)
 
         # Change the output from stacked tensorst to a tensor list
         # As well as pass it through some processing steps to get the keypoint coordinates
@@ -368,7 +382,7 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create dataset
-    batch_size = 5
+    batch_size = 20
     labeled_image_folder = "../images/labeled_images/"
     #scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     scales = [(30, 30), (15, 15)]
@@ -458,7 +472,7 @@ def main():
         file.write("Epoch,Training Loss,Validation Loss\n")
         
         benchmark_acc_train, benchmark_FP_train = run_benchmark(benchmark_model, train_loader, criterion)
-        benchmark_acc_val, benchmark_FP_val = run_benchmark(benchmark_model, train_loader, criterion)
+        benchmark_acc_val, benchmark_FP_val = run_benchmark(benchmark_model, val_loader, criterion)
         print(f'==== Benchmark ====')
         print(f'Training Accuracy: {benchmark_acc_train:.4f}%, Validation Accuracy: {benchmark_acc_val:.4f}%')
         print(f'Training false positives per image: {benchmark_FP_train}, Validation false positive per image: {benchmark_FP_val}')
