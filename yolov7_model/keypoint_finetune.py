@@ -7,6 +7,7 @@ import numpy as np
 from torchvision import transforms
 from typing import List
 import time
+import timeit
 
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
@@ -202,6 +203,7 @@ class CustomLoss(nn.Module):
         total_FP = [0 for _ in range(bs)]
         true_positives = [{"elbow_right": {}, "wrist_right": {}, "elbow_left": {}, "wrist_left": {}} for _ in range(bs)]
 
+        start_time = timeit.default_timer()
         for batch in range(bs):
             for keypoint_index in range(0, 11, 3):
                 mask = targets[0][batch, :, :, keypoint_index+2] > 0.5
@@ -213,7 +215,11 @@ class CustomLoss(nn.Module):
                     y_pos = int(y * y_size + y_size * targets[0][batch, x, y, keypoint_index+1])
                     total_TP[batch] += 1
                     true_positives[batch][POSITIONS[keypoint_index//3]][(x_pos, y_pos)] = False
+        end_time = timeit.default_timer()
+        print(f"Collecting: {end_time - start_time}s")
 
+
+        start_time = timeit.default_timer()
         # Collect positive predicitons from the original yolov7 model
         # And calculate the the number of FP and accuracy
         for batch, prediction in enumerate(predictions):
@@ -239,7 +245,10 @@ class CustomLoss(nn.Module):
                             break
                     if false_positive:
                         total_FP[batch] += 1
+        end_time = timeit.default_timer()
+        print(f"Calculating: {end_time - start_time}s")
 
+        start_time = timeit.default_timer()
         acc_sum = 0
         for i, batch_TP in enumerate(true_positives):
             temp_sum = 0
@@ -250,7 +259,9 @@ class CustomLoss(nn.Module):
                 acc_sum += 1
             else:
                 acc_sum += temp_sum / total_TP[i]
-        
+        end_time = timeit.default_timer()
+        print(f"Summing: {end_time - start_time}s")
+
         return acc_sum / bs, sum(total_FP) / bs
 
 
@@ -349,12 +360,20 @@ def run_benchmark(model, dataloader, criterion):
     for batch_idx, (images, targets) in enumerate(dataloader):
         print(f"Batch {batch_idx}")
         # Forward pass
+        start_time = timeit.default_timer()
         with torch.no_grad():
             outputs, _ = model(images)
+        end_time = timeit.default_timer()
+        print(f"Inference {end_time - start_time}s")
 
-        # Change the output from stacked tensorst to a tensor list
+        # Change the output from stacked tensors to a tensor list
         # As well as pass it through some processing steps to get the keypoint coordinates
-        output_list = [output_to_keypoint(non_max_suppression_kpt(outputs[i], 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True))[:, 7:] for i in range(outputs.shape[0])]
+        start_time = timeit.default_timer()
+        #output_list = [output_to_keypoint(non_max_suppression_kpt(outputs[i], 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True))[:, 7:] for i in range(outputs.shape[0])]
+        output_list = output_to_keypoint(non_max_suppression_kpt(outputs, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True))
+        print(output_list.shape)
+        end_time = timeit.default_timer()
+        print(f"Data transforming {end_time - start_time}s")
 
         # Compute benchamark accuracy and false positives for the batch
         batch_acc, batch_FP = criterion.compute_benchmark(output_list, targets)
@@ -471,6 +490,7 @@ def main():
     with open('training_progress_' + model_name + '.txt', 'w') as file:
         file.write("Epoch,Training Loss,Validation Loss\n")
         
+
         benchmark_acc_train, benchmark_FP_train = run_benchmark(benchmark_model, train_loader, criterion)
         benchmark_acc_val, benchmark_FP_val = run_benchmark(benchmark_model, val_loader, criterion)
         print(f'==== Benchmark ====')
