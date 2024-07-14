@@ -8,6 +8,7 @@
 *.txt
 /images
 /yolov5/runs
+*.zip
 
 # Config files
 *.pyc

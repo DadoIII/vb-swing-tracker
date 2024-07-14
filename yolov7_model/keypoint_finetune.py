@@ -76,6 +76,37 @@ class CustomDataset(Dataset):
         return processed_targets.to(self.device)
         
 
+class OriginalAndBlurredDataset(Dataset):
+    # Define the Gaussian blur augmentation using torchvision
+    transform_gaussian_blur = transforms.Compose([
+        transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+        transforms.ToTensor()
+    ])
+
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self.transform_gaussian_blur = transforms.Compose([
+        transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+        transforms.ToTensor()
+    ])
+        self.length = len(dataset) * 2  # Double the length to include both original and blurred images
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        original_idx = idx // 2
+        image, target = self.dataset[original_idx]
+        
+        if idx % 2 == 1:
+            # Apply Gaussian blur for every second image
+            image = self.transform_gaussian_blur(image)
+        else:
+            # Convert original image to tensor
+            image = image
+
+        return image, target
+
 class CustomLoss(nn.Module):
     def __init__(self, image_width, image_height):
         super(CustomLoss, self).__init__()
@@ -94,7 +125,7 @@ class CustomLoss(nn.Module):
                             Shape: [(bs, x1, y1, 12), (bs, x2, y2, 12), ..., (bs, xn, yn, 12)]
         
         Returns:
-            loss (tensor): Scalar tensor representing the computed loss.
+            torch.Tensor: Scalar tensor representing the computed loss.
         """
         total_loss = 0.0
         scale_outputs = {"losses": {}, "accs": {}, "FP": {}}
@@ -125,7 +156,7 @@ class CustomLoss(nn.Module):
                              Shape: (bs, x, y, 12)
         
         Returns:
-            scale_loss (tensor): Scalar tensor representing the computed loss for the scale.
+            torch.Tensor: Scalar tensor representing the computed loss for the scale.
         """
 
         # Define the number of keypoints
@@ -191,9 +222,19 @@ class CustomLoss(nn.Module):
         return scale_loss, positive_accuracy, false_positives
 
 
-    def compute_benchmark(self, predictions, targets, confidence = 0.5):
+    def compute_benchmark(self, predictions, targets, image_index, confidence = 0.5):
+        """
+        Compute the recall and false positives of the original model on data.
+
+        Parameters:
+            predictions (list): List of tensors representing the predicted keypoints for each image. The tensors are of shape (bs, 51), where bs is the batch size and 51 are the coordinates and confidences of different keypoints.
+            targets (list): List of target elbow and wrist keypoints. The shape of each target (bs, x, y, 12).
+            confidence (int): Optional paremeter indicating what the confidence threshold for a positive keypoint should be.
+
+        Returns:
+            (float, float): A tuple of 2 floats, where first number is the average recall for the batch from 0 to 1. The second number is average number of false positive predictions for the batch.
+        """
         POSITIONS = ("elbow_right", "wrist_right", "elbow_left", "wrist_left")
-        scale_outputs = {"accs": {}, "FP": {}}
         
         bs, x_count, y_count, _ = targets[0].shape
         x_size, y_size = self.image_width / x_count, self.image_height / y_count
@@ -203,7 +244,6 @@ class CustomLoss(nn.Module):
         total_FP = [0 for _ in range(bs)]
         true_positives = [{"elbow_right": {}, "wrist_right": {}, "elbow_left": {}, "wrist_left": {}} for _ in range(bs)]
 
-        start_time = timeit.default_timer()
         for batch in range(bs):
             for keypoint_index in range(0, 11, 3):
                 mask = targets[0][batch, :, :, keypoint_index+2] > 0.5
@@ -215,13 +255,9 @@ class CustomLoss(nn.Module):
                     y_pos = int(y * y_size + y_size * targets[0][batch, x, y, keypoint_index+1])
                     total_TP[batch] += 1
                     true_positives[batch][POSITIONS[keypoint_index//3]][(x_pos, y_pos)] = False
-        end_time = timeit.default_timer()
-        print(f"Collecting: {end_time - start_time}s")
 
-
-        start_time = timeit.default_timer()
         # Collect positive predicitons from the original yolov7 model
-        # And calculate the the number of FP and accuracy
+        # And calculate the the number of FP and recall
         for batch, prediction in enumerate(predictions):
             prediction_keypoints = [[] for _ in range(4)]
             for skeleton in prediction:
@@ -239,30 +275,26 @@ class CustomLoss(nn.Module):
                 for keypoint in prediction_keypoints[pos]: 
                     false_positive = True 
                     for true_keypoint in true_keypoints.keys():
-                        if true_keypoints[true_keypoint] == False and get_keypoint_distance(keypoint, true_keypoint) <= 0.04 * (self.image_width + self.image_height) / 2:
+                        if true_keypoints[true_keypoint] == False and get_keypoint_distance(keypoint, true_keypoint) <= 0.02 * (self.image_width + self.image_height) / 2:
                             true_keypoints[true_keypoint] = True
                             false_positive = False
                             break
                     if false_positive:
                         total_FP[batch] += 1
-        end_time = timeit.default_timer()
-        print(f"Calculating: {end_time - start_time}s")
 
-        start_time = timeit.default_timer()
-        acc_sum = 0
+        recall_sum = 0
         for i, batch_TP in enumerate(true_positives):
             temp_sum = 0
             for keypoint_type in list(batch_TP.values()):
                 temp_sum += sum(list(keypoint_type.values()))
             if total_TP[i] == 0:
                 print(f"0 total true positives... temp_sum = {temp_sum}")
-                acc_sum += 1
+                print(f"Image index: {image_index[i]}")
+                recall_sum += 1
             else:
-                acc_sum += temp_sum / total_TP[i]
-        end_time = timeit.default_timer()
-        print(f"Summing: {end_time - start_time}s")
+                recall_sum += temp_sum / total_TP[i]
 
-        return acc_sum / bs, sum(total_FP) / bs
+        return recall_sum / bs, sum(total_FP) / bs
 
 
 def read_csv_file(file_path):
@@ -355,37 +387,64 @@ def run_benchmark(model, dataloader, criterion):
     model.eval()
     print("Benchmark start")
 
-    total_acc, total_FP = 0, 0
+    total_recall, total_FP = 0, 0
 
-    for batch_idx, (images, targets) in enumerate(dataloader):
+    for batch_idx, (images, targets, image_index) in enumerate(dataloader):
         print(f"Batch {batch_idx}")
         # Forward pass
-        start_time = timeit.default_timer()
         with torch.no_grad():
             outputs, _ = model(images)
-        end_time = timeit.default_timer()
-        print(f"Inference {end_time - start_time}s")
 
         # Change the output from stacked tensors to a tensor list
         # As well as pass it through some processing steps to get the keypoint coordinates
-        start_time = timeit.default_timer()
         #output_list = [output_to_keypoint(non_max_suppression_kpt(outputs[i], 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True))[:, 7:] for i in range(outputs.shape[0])]
-        output_list = output_to_keypoint(non_max_suppression_kpt(outputs, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True))
-        print(output_list.shape)
-        end_time = timeit.default_timer()
-        print(f"Data transforming {end_time - start_time}s")
+        #output_list = output_to_keypoint(non_max_suppression_kpt(outputs, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True))
+        output_list = non_max_suppression_kpt(outputs, 0.25, 0.65, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'], kpt_label=True)
+        output_list = [output[:,6:] for output in output_list]
+        #print(len(output_list))
+        #for list in output_list:
+        #    print(list.shape)
+        #    print(list)
+        #print(output_list.shape)
 
-        # Compute benchamark accuracy and false positives for the batch
-        batch_acc, batch_FP = criterion.compute_benchmark(output_list, targets)
+        # Compute benchamark recall and false positives for the batch
+        batch_recall, batch_FP = criterion.compute_benchmark(output_list, targets, image_index)
 
-        # Accumulate accuracy and false positives
-        total_acc += batch_acc
+        # Accumulate recall and false positives
+        total_recall += batch_recall
         total_FP += batch_FP
         
     # Divide by number of batches
     num_batches = len(dataloader)
-    return total_acc / num_batches * 100, total_FP / num_batches
+    return total_recall / num_batches * 100, total_FP / num_batches
 
+
+def print_benchmark(model, train_loader, val_loader, criterion):
+    benchmark_recall_train, benchmark_FP_train = run_benchmark(model, train_loader, criterion)
+    benchmark_recall_val, benchmark_FP_val = run_benchmark(model, val_loader, criterion)
+
+    print(f'==== Benchmark ====')
+    print(f'Training recall: {benchmark_recall_train:.4f}%, Validation recall: {benchmark_recall_val:.4f}%')
+    print(f'Training false positives per image: {benchmark_FP_train}, Validation false positive per image: {benchmark_FP_val}')
+
+
+def print_epoch_stats(model, train_loader, val_loader, criterion, optimiser=None, scheduler=None, update_weights=False):
+    start_time = time.time()
+    train_loss, train_scale_outputs = run_epoch(model, train_loader, criterion, optimiser=optimiser, scheduler=scheduler, update_weights=update_weights)
+    val_loss, val_scale_outputs = run_epoch(model, val_loader, criterion, update_weights=False)
+    end_time = time.time()
+
+    print(f"Time: {end_time - start_time:.4f}s")
+    print(f'Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}')
+    print(f'Training accuracy: {train_scale_outputs['accs']}%')
+    print(f'Validation accuracy: {val_scale_outputs['accs']}%')
+    print(f'Training false positives: {train_scale_outputs['FP']}')
+    print(f'Validation false positives: {val_scale_outputs['FP']}')
+    print(f'Train losses: {train_scale_outputs['losses']}')
+    print(f'Val losses: {val_scale_outputs['losses']}')
+
+    return train_loss, val_loss
+    
 
 def main():
     #torch.manual_seed(1)
@@ -401,16 +460,13 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create dataset
-    batch_size = 20
+    batch_size = 24
     labeled_image_folder = "../images/labeled_images/"
     #scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     scales = [(30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
-    #train_set, val_set, temp = torch.utils.data.random_split(dataset, [2626, 500, 4])
-    train_set, val_set = torch.utils.data.random_split(dataset, [2200, 250])
-    #train_set, val_set, temp = torch.utils.data.random_split(dataset, [500, 300, 2330])
-    #train_set, val_set, temp = torch.utils.data.random_split(dataset, [1000, 300, 1830])
-    #train_set, val_set, temp = torch.utils.data.random_split(dataset, [1, 1, 1468])
+    blurred_dataset = OriginalAndBlurredDataset(dataset=dataset)
+    train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset) - 250, 250])
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size)
 
@@ -422,18 +478,6 @@ def main():
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
     _ = model.eval()
-
-#     target_train_loss, target_train_scale_outputs = run_epoch(model, train_loader, criterion, update_weights=False)
-#     target_val_loss, target_val_scale_outputs = run_epoch(model, val_loader, criterion, update_weights=False)
-#     target_stats = f'''===== Target stats =====
-# Training Loss: {target_train_loss:.4f}, Validation Loss: {target_val_loss:.4f}
-# Training accuracy: {target_train_scale_outputs['accs']}%
-# Validation accuracy: {target_val_scale_outputs['accs']}%
-# Training false positives: {target_train_scale_outputs['FP']}
-# Validation false positives: {target_val_scale_outputs['FP']}
-# Train losses: {target_train_scale_outputs['losses']}
-# Val losses: {target_val_scale_outputs['losses']}'''
-
 
     # Adjust model
     #layer = MyIKeypoint(ch=(256, 512, 768, 1024))
@@ -484,48 +528,25 @@ def main():
         scheduler = None
 
     # Empty the txt file
-    with open("gradient_log.txt", "w") as gradient_log:
+    with open("gradient_log.txt", "w") as _:
         pass
 
     with open('training_progress_' + model_name + '.txt', 'w') as file:
         file.write("Epoch,Training Loss,Validation Loss\n")
         
-
-        benchmark_acc_train, benchmark_FP_train = run_benchmark(benchmark_model, train_loader, criterion)
-        benchmark_acc_val, benchmark_FP_val = run_benchmark(benchmark_model, val_loader, criterion)
-        print(f'==== Benchmark ====')
-        print(f'Training Accuracy: {benchmark_acc_train:.4f}%, Validation Accuracy: {benchmark_acc_val:.4f}%')
-        print(f'Training false positives per image: {benchmark_FP_train}, Validation false positive per image: {benchmark_FP_val}')
+        #print_benchmark(benchmark_model, train_loader, val_loader, criterion)
 
         # Print losses before the first epoch
-        epoch_loss, train_scale_outputs = run_epoch(model, train_loader, criterion, update_weights=False)
-        val_loss, val_scale_outputs = run_epoch(model, val_loader, criterion, update_weights=False)
         print(f'==== Epoch [0/{num_epochs}] ====')
-        print(f'Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}')
-        print(f'Training accuracy: {train_scale_outputs['accs']}%')
-        print(f'Validation accuracy: {val_scale_outputs['accs']}%')
-        print(f'Training false positives: {train_scale_outputs['FP']}')
-        print(f'Validation false positives: {val_scale_outputs['FP']}')
-        print(f'Train losses: {train_scale_outputs['losses']}')
-        print(f'Val losses: {val_scale_outputs['losses']}')
-        file.write(f"0,{epoch_loss},{val_loss}\n")
+        train_loss, val_loss = print_epoch_stats(model, train_loader, val_loader, criterion, update_weights=False)
+        file.write(f"0,{train_loss},{val_loss}\n")
 
         for epoch in range(num_epochs):
-            start_time = time.time()
-            epoch_loss, train_scale_outputs = run_epoch(model, train_loader, criterion, optimiser, scheduler)
-            val_loss, val_scale_outputs = run_epoch(model, val_loader, criterion, update_weights=False)
-            end_time = time.time()
-            print(f'==== Epoch [{epoch+1}/{num_epochs}] ====  Time: {end_time-start_time}s')
-            print(f'Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}')
-            print(f'Training accuracy: {train_scale_outputs['accs']}%')
-            print(f'Validation accuracy: {val_scale_outputs['accs']}%')
-            print(f'Training false positives: {train_scale_outputs['FP']}')
-            print(f'Validation false positives: {val_scale_outputs['FP']}')
-            print(f'Train losses: {train_scale_outputs['losses']}')
-            print(f'Val losses: {val_scale_outputs['losses']}')
+            print(f'==== Epoch [{epoch+1}/{num_epochs}] ====')
+            train_loss, val_loss = print_epoch_stats(model, train_loader, val_loader, criterion, optimiser=optimiser, scheduler=scheduler, update_weights=True)
 
             # Write epoch results to file
-            file.write(f"{epoch+1},{epoch_loss},{val_loss}\n")
+            file.write(f"{epoch+1},{train_loss},{val_loss}\n")
 
     torch.save(model, model_name + '.pt')
 
