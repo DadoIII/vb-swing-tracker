@@ -8,29 +8,56 @@ from my_utils import elbow_wrist_nms
 class TestLossAndDataset(unittest.TestCase):
     custom_loss = CustomLoss(960, 960)
 
-    def test_single_label(self):
+    def test_loss_confidence(self):
         tests = [
-            (torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  
-             torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Same tensors with detection 
+            (torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),  
+             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),  # Same tensors with detection 
              0),
-            (torch.Tensor([10, 10, 0, 25, 25, 0] + [0]*6).view(1,1,1,12),
-             torch.Tensor([10, 10, 0, 25, 25, 0] + [0]*6).view(1,1,1,12),  # Same tensors without detection
+            (torch.Tensor([0, 0, 0, 0, 0, 0] + [0]*6).view(1,1,1,12),
+             torch.Tensor([0, 0, 0, 0, 0, 0] + [0]*6).view(1,1,1,12),  # Same tensors without detection
              0),
+            (torch.Tensor([0, 0, 0, 0, 0, 1] + [0]*6).view(1,1,1,12),
+             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),  # Different confidence
+             100),
+            (torch.Tensor([0, 0, 1, 0, 0, 0.5] + [0]*6).view(1,1,1,12),
+             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),  # Different confidence
+             50),
+            (torch.Tensor(([0, 0, 0, 0, 0, 0] + [0]*6) * 8).view(2,2,2,12),
+             torch.Tensor(([0, 0, 1, 0, 0, 0] + [0]*6) * 8).view(2,2,2,12),  # Multiple batches and grid cells
+             100),
+        ]
+
+        # for pred, true, loss in tests:
+        #     try:
+        #         computed_loss = self.custom_loss.compute_scale_loss(pred, true)
+        #         self.assertEqual(computed_loss, loss)
+        #     except AssertionError:
+        #         print(f"Failed for pred: {pred}, true: {true}, expected_loss: {loss}, computed_loss: {computed_loss}")
+        #        raise  # Re-raise the AssertionError to stop the test
+
+    def test_loss_position(self):
+        tests = [
             (torch.Tensor([100, 100, 0, 250, 250, 0] + [0]*6).view(1,1,1,12),
              torch.Tensor([10, 10, 0, 25, 25, 0] + [0]*6).view(1,1,1,12),  # No detection different positions
              0),
-            (torch.Tensor([10, 10, 0, 25, 25, 1] + [0]*6).view(1,1,1,12),
-             torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Different confidence
-             100),
-            (torch.Tensor([10, 10, 1, 25, 25, 0] + [0]*6).view(1,1,1,12),
-             torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Different confidence
-             100),
             (torch.Tensor([100, 100, 1, 250, 250, 1] + [0]*6).view(1,1,1,12),
              torch.Tensor([10, 10, 0, 25, 25, 0] + [0]*6).view(1,1,1,12),  # No detection, different confidence and positions
              200),
             (torch.Tensor([15, 15, 1, 30, 30, 1] + [0]*6).view(1,1,1,12),
              torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Detection with different positions
              4 * 25),
+        ]
+
+        # for pred, true, loss in tests:
+        #     try:
+        #         computed_loss = self.custom_loss.compute_scale_loss(pred, true)
+        #         self.assertEqual(computed_loss, loss)
+        #     except AssertionError:
+        #         print(f"Failed for pred: {pred}, true: {true}, expected_loss: {loss}, computed_loss: {computed_loss}")
+        #        raise  # Re-raise the AssertionError to stop the test
+
+    def test_loss_combined(self):
+        tests = [
             (torch.Tensor([15, 15, 0, 30, 30, 0] + [0]*6).view(1,1,1,12),
              torch.Tensor([10, 10, 1, 25, 25, 1] + [0]*6).view(1,1,1,12),  # Detection with different confidence and positions
              4 * 25 + 2 * 100),

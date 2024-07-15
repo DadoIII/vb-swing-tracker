@@ -56,7 +56,7 @@ class CustomDataset(Dataset):
         """
         targets = self.targets[idx]
 
-        # Create empty x x y x 12 tensor
+        # Create empty (x, y, 12) tensor
         processed_targets = torch.zeros((x_num_cells, y_num_cells, 12)).half()
 
         # Format and normalise labels
@@ -108,10 +108,12 @@ class OriginalAndBlurredDataset(Dataset):
         return image, target
 
 class CustomLoss(nn.Module):
-    def __init__(self, image_width, image_height):
+    def __init__(self, image_width, image_height, pos_weight_scaling_factor = 0.5, loss_confidence_scaling_factor = 1):
         super(CustomLoss, self).__init__()
         self.image_width = image_width
         self.image_height = image_height
+        self.pos_weight_scaling_factor = pos_weight_scaling_factor
+        self.loss_confidence_scaling_factor = loss_confidence_scaling_factor
         #self.BCE = nn.BCEWithLogitsLoss(reduction='mean')
 
     def forward(self, predictions, targets):
@@ -156,7 +158,9 @@ class CustomLoss(nn.Module):
                              Shape: (bs, x, y, 12)
         
         Returns:
-            torch.Tensor: Scalar tensor representing the computed loss for the scale.
+            torch.Tensor: Scalar tensor representing the computed loss for the scale
+            float: The recall of the scale
+            int: The number of false positives for the scale
         """
 
         # Define the number of keypoints
@@ -166,60 +170,52 @@ class CustomLoss(nn.Module):
         x_cells, y_cells = pred.shape[1], pred.shape[2]
 
         # Split predictions and targets into separate tensors for each keypoint
-        pred = pred.split(3, dim=-1)  # Split along the last dimension
-        target = target.split(3, dim=-1)
         scale_loss = 0.0
         true_positives = 0
         false_positives = 0
         positive_targets = 0
 
-        # Compute loss for each keypoint
-        for i in range(num_keypoints):
-            pred_x, pred_y, pred_conf = F.sigmoid(pred[i][:, :, :, 0]), F.sigmoid(pred[i][:, :, :, 1]), pred[i][:, :, :, 2]
-            target_x, target_y, target_conf = target[i][:, :, :, 0], target[i][:, :, :, 1], target[i][:, :, :, 2]
+        # Split by x, y, conf
+        pred_x, pred_y, pred_conf = F.sigmoid(pred[:, :, :, 0::3]), F.sigmoid(pred[:, :, :, 1::3]), pred[:, :, :, 2::3]
+        target_x, target_y, target_conf = target[:, :, :, 0::3], target[:, :, :, 1::3], target[:, :, :, 2::3]
 
-            # Scale by the grid cell size
-            scaled_pred_x = pred_x * self.image_width / x_cells
-            scaled_target_x = target_x * self.image_width / x_cells
-            scaled_pred_y = pred_y * self.image_height / y_cells
-            scaled_target_y = target_y * self.image_height / y_cells
+        # Scale by the grid cell size
+        scaled_pred_x = pred_x * self.image_width / x_cells
+        scaled_target_x = target_x * self.image_width / x_cells
+        scaled_pred_y = pred_y * self.image_height / y_cells
+        scaled_target_y = target_y * self.image_height / y_cells
 
-            # Compute the mask for reliable predictions based on ground truth confidence scores
-            mask = (target_conf == 1).squeeze(-1)
+        # Compute the mask based on ground truth confidence scores
+        mask = (target_conf == 1).squeeze(-1)
 
-            positive_keypoints = torch.sum(mask)
-            pos_weight = (x_cells * y_cells - positive_keypoints) / positive_keypoints
-            binary_cross_entropy = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight)
+        positive_keypoints = torch.sum(mask)
+        pos_weight = (x_cells * y_cells - positive_keypoints) / positive_keypoints * self.pos_weight_scaling_factor
+        binary_cross_entropy = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight)
 
-            # Compute the positional loss for the current keypoint (considering only ground truth keypoints)
-            if mask.nonzero().numel() > 0:
-                loss_x = F.mse_loss(scaled_pred_x[mask], scaled_target_x[mask])
-                loss_y = F.mse_loss(scaled_pred_y[mask], scaled_target_y[mask])
-            else:
-                loss_x = loss_y = torch.tensor(0.0, device=pred[i].device, requires_grad=True)
+        # Compute the positional loss for the current keypoint (considering only ground truth keypoints)
+        if mask.nonzero().numel() > 0:
+            loss_x = F.mse_loss(scaled_pred_x[mask], scaled_target_x[mask])
+            loss_y = F.mse_loss(scaled_pred_y[mask], scaled_target_y[mask])
+        else:
+            loss_x = loss_y = torch.tensor(0.0, device=pred.device, requires_grad=True)
 
-            # Compute the confidence loss for the current keypoint
-            #loss_conf = F.binary_cross_entropy(pred_conf.view(-1), target_conf.view(-1))
-            
-            #pred_conf_masked = pred_conf * mask
+        # Compute the confidence loss for the current keypoint
+        loss_conf = binary_cross_entropy(pred_conf, target_conf)
 
-            loss_conf = binary_cross_entropy(pred_conf, target_conf)
+        # Accumulate the losses
+        #keypoint_loss = loss_x + loss_y + (loss_conf * self.loss_confidence_scaling_factor)
+        keypoint_loss = loss_conf * self.loss_confidence_scaling_factor
+        scale_loss += keypoint_loss
 
-            # Accumulate the losses
-            #keypoint_loss = loss_x + loss_y + (loss_conf * 10)
-            keypoint_loss = loss_conf
-            scale_loss += keypoint_loss
-
-             # Calculate true positives and false positives
-            pred_labels = (pred_conf > 0.8).squeeze()  # Predicted labels based on confidence threshold
-            positive_targets += torch.sum(mask)  # Count the number of positive targets
-            true_positives += torch.sum(pred_labels & mask).item()  # Count true positives
-            false_positives += torch.sum(pred_labels & ~mask).item()  # Count false positives
-
-        positive_accuracy = true_positives / positive_targets
+        # Calculate true positives and false positives
+        pred_labels = (pred_conf > 0.8).squeeze()  # Predicted labels based on confidence threshold
+        positive_targets = torch.sum(mask)  # Count the number of positive targets
+        true_positives = torch.sum(pred_labels & mask).item()  # Count true positives
+        false_positives = torch.sum(pred_labels & ~mask).item()  # Count false positives
+        recall = true_positives / positive_targets
 
         #return scale_loss
-        return scale_loss, positive_accuracy, false_positives
+        return scale_loss, recall, false_positives
 
 
     def compute_benchmark(self, predictions, targets, image_index, confidence = 0.5):
@@ -451,21 +447,21 @@ def main():
 
     image_width = image_height = 960
     num_epochs = 50
-    lr = 5e-4
-    momentum = 0.9
-    weight_decay = 0.15
+    lr = 5e-5
+    momentum = 0.95
+    weight_decay = 0
     lr_decay = True  # Learning rate decay
     model_name = f'{num_epochs}_epochs_{lr}_lr_{momentum}_m_{weight_decay}_wd_lr_decay={lr_decay}'
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create dataset
-    batch_size = 24
+    batch_size = 6
     labeled_image_folder = "../images/labeled_images/"
     #scales = [(120, 120), (60, 60), (30, 30), (15, 15)]
     scales = [(30, 30), (15, 15)]
     dataset = CustomDataset("../images/labels/annotations_multi.csv", labeled_image_folder, scales, device)
-    blurred_dataset = OriginalAndBlurredDataset(dataset=dataset)
+    #blurred_dataset = OriginalAndBlurredDataset(dataset=dataset)
     train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset) - 250, 250])
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size)
@@ -477,7 +473,7 @@ def main():
     benchmark_model = torch.load('yolov7-w6-pose.pt', map_location=device)['model']
     weigths = torch.load('yolov7-w6-pose.pt', map_location=device)
     model = weigths['model']
-    _ = model.eval()
+    #_ = model.eval()
 
     # Adjust model
     #layer = MyIKeypoint(ch=(256, 512, 768, 1024))
