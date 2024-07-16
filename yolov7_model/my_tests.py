@@ -6,34 +6,54 @@ from keypoint_finetune import CustomLoss, CustomDataset
 from my_utils import elbow_wrist_nms
 
 class TestLossAndDataset(unittest.TestCase):
-    custom_loss = CustomLoss(960, 960)
+    weight_factor = 0.5
+    loss_factor = 10
+    custom_loss = CustomLoss(960, 960, pos_weight_scaling_factor=weight_factor, loss_confidence_scaling_factor=loss_factor)
 
     def test_loss_confidence(self):
         tests = [
-            (torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),  
-             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),  # Same tensors with detection 
-             0),
-            (torch.Tensor([0, 0, 0, 0, 0, 0] + [0]*6).view(1,1,1,12),
-             torch.Tensor([0, 0, 0, 0, 0, 0] + [0]*6).view(1,1,1,12),  # Same tensors without detection
-             0),
-            (torch.Tensor([0, 0, 0, 0, 0, 1] + [0]*6).view(1,1,1,12),
-             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),  # Different confidence
-             100),
-            (torch.Tensor([0, 0, 1, 0, 0, 0.5] + [0]*6).view(1,1,1,12),
-             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),  # Different confidence
-             50),
-            (torch.Tensor(([0, 0, 0, 0, 0, 0] + [0]*6) * 8).view(2,2,2,12),
-             torch.Tensor(([0, 0, 1, 0, 0, 0] + [0]*6) * 8).view(2,2,2,12),  # Multiple batches and grid cells
-             100),
+            (torch.Tensor([0, 0, -100, 0, 0, -100] + [0,0,-100]*2).view(1,1,1,12),  
+             torch.Tensor([0, 0, 0, 0, 0, 0] + [0]*6).view(1,1,1,12),             # Same tensors with detection 
+             0,1,0),  # Loss, recall, false positive count
+            (torch.Tensor([0, 0, 100, 0, 0, 100] + [0,0,-100]*2).view(1,1,1,12),
+             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),             # Same tensors without detection
+             0,1,0),  # Loss, recall, false positive count
+            (torch.Tensor([0, 0, 1, 0, 0, -100] + [0,0,-100]*2).view(1,1,1,12),
+             torch.Tensor([0, 0, 0, 0, 0, 0] + [0]*6).view(1,1,1,12),             # False positive
+             3.2831,1,1),  # Loss, recall, false positive count
+            (torch.Tensor([0, 0, -1, 0, 0, 100] + [0,0,-100]*2).view(1,1,1,12),   # False negative 
+             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),             # Balanced positive examples
+             1.6415,0.5,0),  # Loss, recall, false positive count
+            (torch.Tensor([0, 0, -1, 0, 0, -100] + [0,0,-100]*2).view(1,1,1,12),  # False negative
+             torch.Tensor([0, 0, 1, 0, 0, 0] + [0]*6).view(1,1,1,12),             # Imbalanced positive examples
+             4.9247,0,0),  # Loss, recall, false positive count
+            (torch.Tensor([0, 0, -1, 0, 0, -1] + [0,0,-100]*2).view(1,1,1,12),  # False negative
+             torch.Tensor([0, 0, 1, 0, 0, 1] + [0]*6).view(1,1,1,12),             # Balanced positive examples
+             3.2831,0,0),  # Loss, recall, false positive count
+            (torch.Tensor(([0, 0, 1, 0, 0, -100] + [0,0,-100]*2) * 8).view(2,2,2,12),
+             torch.Tensor(([0, 0, 0, 0, 0, 0] + [0]*6) * 8).view(2,2,2,12),       # Multiple batches and grid cells
+             3.2831,1,8),  # Loss, recall, false positive count
         ]
 
-        # for pred, true, loss in tests:
-        #     try:
-        #         computed_loss = self.custom_loss.compute_scale_loss(pred, true)
-        #         self.assertEqual(computed_loss, loss)
-        #     except AssertionError:
-        #         print(f"Failed for pred: {pred}, true: {true}, expected_loss: {loss}, computed_loss: {computed_loss}")
-        #        raise  # Re-raise the AssertionError to stop the test
+        for pred, true, loss, recall, false_positives in tests:
+            computed_loss, computed_recall, computed_false_positives = self.custom_loss.compute_scale_loss(pred, true)
+            try:
+                self.assertAlmostEqual(computed_loss, loss, delta=1e-4)
+            except AssertionError:
+                print(f"Loss assertion failed for prediction: {pred}, true: {true}, expected_loss: {loss}, computed_loss: {computed_loss}")
+                raise  # Re-raise the AssertionError to stop the test
+
+            try:
+                self.assertEqual(computed_recall, recall)
+            except AssertionError:
+                print(f"Recall assertion failed for prediction: {pred}, true: {true}, expected_recall: {recall}, computed_recall: {computed_recall}")
+                raise  # Re-raise the AssertionError to stop the test
+
+            try:
+                self.assertEqual(computed_false_positives, false_positives)
+            except AssertionError:
+                print(f"False positive assertion failed for prediction: {pred}, true: {true}, expected_false_positives: {false_positives}, computed_false_positives: {computed_false_positives}")
+                raise  # Re-raise the AssertionError to stop the test
 
     def test_loss_position(self):
         tests = [

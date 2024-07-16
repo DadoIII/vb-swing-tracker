@@ -189,8 +189,12 @@ class CustomLoss(nn.Module):
         mask = (target_conf == 1).squeeze(-1)
 
         positive_keypoints = torch.sum(mask)
-        pos_weight = (x_cells * y_cells - positive_keypoints) / positive_keypoints * self.pos_weight_scaling_factor
-        binary_cross_entropy = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight)
+        if positive_keypoints == 0:
+            pos_weight = torch.tensor(1, device=pred.device)
+        else:
+            pos_weight = self.pos_weight_scaling_factor * (4 * x_cells * y_cells - positive_keypoints) / positive_keypoints
+
+        binary_cross_entropy = nn.BCEWithLogitsLoss(reduction='mean', weight=torch.tensor(self.loss_confidence_scaling_factor, device=pred.device), pos_weight=pos_weight)
 
         # Compute the positional loss for the current keypoint (considering only ground truth keypoints)
         if mask.nonzero().numel() > 0:
@@ -203,16 +207,19 @@ class CustomLoss(nn.Module):
         loss_conf = binary_cross_entropy(pred_conf, target_conf)
 
         # Accumulate the losses
-        #keypoint_loss = loss_x + loss_y + (loss_conf * self.loss_confidence_scaling_factor)
-        keypoint_loss = loss_conf * self.loss_confidence_scaling_factor
+        #keypoint_loss = loss_x + loss_y + (loss_conf)
+        keypoint_loss = loss_conf
         scale_loss += keypoint_loss
 
         # Calculate true positives and false positives
-        pred_labels = (pred_conf > 0.8).squeeze()  # Predicted labels based on confidence threshold
+        pred_labels = (F.sigmoid(pred_conf) > 0.5).squeeze()  # Predicted labels based on confidence threshold
         positive_targets = torch.sum(mask)  # Count the number of positive targets
         true_positives = torch.sum(pred_labels & mask).item()  # Count true positives
         false_positives = torch.sum(pred_labels & ~mask).item()  # Count false positives
-        recall = true_positives / positive_targets
+        if positive_targets == 0:
+            recall = 1
+        else:
+            recall = true_positives / positive_targets
 
         #return scale_loss
         return scale_loss, recall, false_positives

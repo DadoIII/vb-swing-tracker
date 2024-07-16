@@ -3,11 +3,10 @@ import torch.nn as nn
 import numpy as np
 from torchvision import transforms
 
-pos_weight = torch.tensor([2])
-binary_cross_entropy = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight)
+# Calculate sigmoid(0)
+sigmoid_0 = torch.sigmoid(torch.tensor(-1))
 
-pred = torch.Tensor([[1,1,1],[1,1,1]])
-target = torch.Tensor([[0,0,0],[0,0,0]])
-
-loss_conf = binary_cross_entropy(pred, target)
-print(loss_conf)
+# Calculate -10 * log(sigmoid(0))
+result = -10 * 0.5 * torch.log(sigmoid_0) / 2
+print(sigmoid_0)
+print(result.item())
